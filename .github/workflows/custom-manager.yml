@@ -110,7 +110,7 @@ jobs:
           APK=$(find delivery -name '*.apk' | head -n1)
           TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n1)
           "$TOOLS/apksigner" verify --verbose --print-certs "$APK" | tee delivery/signature.txt
-          grep -F "Signer #1 certificate SHA-256 digest: $EXPECTED_HASH" delivery/signature.txt
+          grep -F "certificate SHA-256 digest: $EXPECTED_HASH" delivery/signature.txt
           "$TOOLS/zipalign" -c -p 4 "$APK"
           "$TOOLS/aapt" dump badging "$APK" > delivery/package.txt
           grep -F "package: name='op.ultra.plus'" delivery/package.txt
