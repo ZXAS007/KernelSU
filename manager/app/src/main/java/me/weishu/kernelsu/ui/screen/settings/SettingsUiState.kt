@@ -35,6 +35,8 @@ data class SettingsUiState(
     val kernelUmountStatus: String = "",
     val isKernelUmountEnabled: Boolean = false,
 
+    val selinuxEnforcing: Boolean? = null,
+    val selinuxBusy: Boolean = false,
     // SELinux Hide
     val selinuxHideStatus: String = "",
     val isSelinuxHideEnabled: Boolean = false,
@@ -69,6 +71,7 @@ data class SettingsScreenActions(
     val onOpenProfileTemplate: () -> Unit,
     val onSetSuCompatMode: (Int) -> Unit,
     val onSetKernelUmountEnabled: (Boolean) -> Unit,
+    val onSetSelinuxEnforcing: (Boolean) -> Unit,
     val onSetSelinuxHideEnabled: (Boolean) -> Unit,
     val onSetSulogEnabled: (Boolean) -> Unit,
     val onSetAdbRootEnabled: (Boolean) -> Unit,
