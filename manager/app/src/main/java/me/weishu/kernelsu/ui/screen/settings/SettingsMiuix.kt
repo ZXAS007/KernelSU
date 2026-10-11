@@ -259,6 +259,13 @@ fun SettingPagerMiuix(
                                 onCheckedChange = actions.onSetKernelUmountEnabled
                             )
 
+                            SwitchPreference(
+                                title = stringResource(R.string.settings_selinux_enforcing),
+                                summary = stringResource(R.string.settings_selinux_session_summary),
+                                enabled = uiState.selinuxEnforcing != null && !uiState.selinuxBusy,
+                                checked = uiState.selinuxEnforcing == true,
+                                onCheckedChange = actions.onSetSelinuxEnforcing
+                            )
                             val selinuxHideSummary = when (uiState.selinuxHideStatus) {
                                 "unsupported" -> stringResource(id = R.string.feature_status_unsupported_summary)
                                 "managed" -> stringResource(id = R.string.feature_status_managed_summary)

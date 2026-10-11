@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import me.weishu.kernelsu.ui.util.SelinuxStateChanges
+import me.weishu.kernelsu.ui.util.getRootShell
 import me.weishu.kernelsu.Natives
 import me.weishu.kernelsu.R
 import me.weishu.kernelsu.data.repository.SettingsRepository
@@ -32,6 +34,7 @@ class SettingsViewModel(
 
     fun refresh() {
         viewModelScope.launch {
+            val selinuxEnforcing = withContext(Dispatchers.IO) { readSelinuxEnforcing() }
             val checkUpdate = repo.checkUpdate
             val checkModuleUpdate = repo.checkModuleUpdate
             val themeMode = repo.themeMode
@@ -94,6 +97,7 @@ class SettingsViewModel(
 
             _uiState.update {
                 it.copy(
+                    selinuxEnforcing = if (it.selinuxBusy) it.selinuxEnforcing else selinuxEnforcing,
                     uiMode = uiMode,
                     checkUpdate = checkUpdate,
                     checkModuleUpdate = checkModuleUpdate,
@@ -131,6 +135,39 @@ class SettingsViewModel(
                     useSoftReboot = useSoftReboot,
                     isLateLoadMode = isLateLoadMode,
                 )
+            }
+        }
+    }
+
+    private fun readSelinuxEnforcing(): Boolean? = runCatching {
+        val result = getRootShell().newJob()
+            .add("/system/bin/getenforce").to(ArrayList<String>(), null).exec()
+        if (!result.isSuccess) return@runCatching null
+        when (result.out.firstOrNull()?.trim()) {
+            "Enforcing" -> true
+            "Permissive" -> false
+            else -> null
+        }
+    }.getOrNull()
+
+    fun setSelinuxEnforcing(enabled: Boolean) {
+        if (_uiState.value.selinuxBusy || _uiState.value.selinuxEnforcing == null) return
+        _uiState.update { it.copy(selinuxBusy = true) }
+        viewModelScope.launch {
+            val (success, actual) = withContext(Dispatchers.IO) {
+                val success = runCatching {
+                    getRootShell().newJob()
+                        .add("/system/bin/setenforce ${if (enabled) 1 else 0}")
+                        .exec().isSuccess
+                }.getOrDefault(false)
+                success to readSelinuxEnforcing()
+            }
+            _uiState.update { it.copy(selinuxEnforcing = actual, selinuxBusy = false) }
+            if (success && actual == enabled) {
+                SelinuxStateChanges.notifyChanged()
+            }
+            if (!success || actual != enabled) {
+                Toast.makeText(ksuApp, R.string.settings_selinux_toggle_failed, Toast.LENGTH_LONG).show()
             }
         }
     }
