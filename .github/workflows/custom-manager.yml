@@ -91,7 +91,16 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew clean assembleRelease -PKSU_PACKAGE_NAME=op.ultra.plus
+      - name: Sign final APK with cloud certificate
+        env:
+          PASSWORD: ${{ secrets.KSU_CLOUD_PASSWORD }}
+        run: |
+          TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n1)
+          APK=$(find manager/app/build/outputs/apk/release -name '*.apk' | head -n1)
+          "$TOOLS/zipalign" -f -p 4 "$APK" "$RUNNER_TEMP/aligned.apk"
+          "$TOOLS/apksigner" sign --ks "$RUNNER_TEMP/cloud.jks" --ks-key-alias cloud-manager --ks-pass env:PASSWORD --key-pass env:PASSWORD --out "$APK" "$RUNNER_TEMP/aligned.apk"
       - name: Verify final APK and record provenance
+
         env:
           EXPECTED_HASH: ${{ needs.certificate.outputs.hash }}
           EXPECTED_SIZE: ${{ needs.certificate.outputs.size }}
@@ -100,7 +109,7 @@ jobs:
           cp manager/app/build/outputs/apk/release/*.apk delivery/
           APK=$(find delivery -name '*.apk' | head -n1)
           TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n1)
-          "$TOOLS/apksigner" verify --verbose --print-certs "$APK" > delivery/signature.txt
+          "$TOOLS/apksigner" verify --verbose --print-certs "$APK" | tee delivery/signature.txt
           grep -F "Signer #1 certificate SHA-256 digest: $EXPECTED_HASH" delivery/signature.txt
           "$TOOLS/zipalign" -c -p 4 "$APK"
           "$TOOLS/aapt" dump badging "$APK" > delivery/package.txt
