@@ -65,10 +65,10 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v6
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: ksud-*
-          path: payload
+      - name: Download matched ksud artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --pattern 'ksud-*' --dir payload
       - name: Place freshly built payload
         run: |
           mkdir -p manager/app/src/main/jniLibs/{arm64-v8a,x86_64,riscv64}
