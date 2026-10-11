@@ -10,7 +10,7 @@ jobs:
       size: ${{ steps.cert.outputs.size }}
       hash: ${{ steps.cert.outputs.hash }}
     steps:
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
@@ -27,7 +27,7 @@ jobs:
           printf 'size=0x%04x\n' "$(stat -c%s certificate.der)" >> "$GITHUB_OUTPUT"
           printf 'hash=%s\n' "$(sha256sum certificate.der | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
           rm "$RUNNER_TEMP/cloud.jks"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: cloud-public-certificate
           path: certificate.der
@@ -55,15 +55,15 @@ jobs:
     needs: [certificate, ksud]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
-      - uses: gradle/actions/setup-gradle@v4
-      - uses: actions/download-artifact@v4
+      - uses: gradle/actions/setup-gradle@v6
+      - uses: actions/download-artifact@v8
         with:
           pattern: ksud-*
           path: payload
@@ -90,7 +90,7 @@ jobs:
         working-directory: manager
         run: |
           chmod +x gradlew
-          ./gradlew clean assembleRelease -PKSU_PACKAGE_NAME=op.ultra.plus
+          ./gradlew clean assembleRelease --warning-mode all -PKSU_PACKAGE_NAME=op.ultra.plus
       - name: Sign final APK with cloud certificate
         env:
           PASSWORD: ${{ secrets.KSU_CLOUD_PASSWORD }}
@@ -98,7 +98,7 @@ jobs:
           TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n1)
           APK=$(find manager/app/build/outputs/apk/release -name '*.apk' | head -n1)
           "$TOOLS/zipalign" -f -p 4 "$APK" "$RUNNER_TEMP/aligned.apk"
-          "$TOOLS/apksigner" sign --ks "$RUNNER_TEMP/cloud.jks" --ks-key-alias cloud-manager --ks-pass env:PASSWORD --key-pass env:PASSWORD --out "$APK" "$RUNNER_TEMP/aligned.apk"
+          "$TOOLS/apksigner" sign --v1-signing-enabled false --v2-signing-enabled true --v3-signing-enabled false --v4-signing-enabled false --ks "$RUNNER_TEMP/cloud.jks" --ks-key-alias cloud-manager --ks-pass env:PASSWORD --key-pass env:PASSWORD --out "$APK" "$RUNNER_TEMP/aligned.apk"
       - name: Verify final APK and record provenance
 
         env:
@@ -110,6 +110,11 @@ jobs:
           APK=$(find delivery -name '*.apk' | head -n1)
           TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n1)
           "$TOOLS/apksigner" verify --verbose --print-certs "$APK" | tee delivery/signature.txt
+          grep -F "Verified using v2 scheme (APK Signature Scheme v2): true" delivery/signature.txt
+          grep -F "Verified using v1 scheme (JAR signing): false" delivery/signature.txt
+          grep -F "Verified using v3 scheme (APK Signature Scheme v3): false" delivery/signature.txt
+          grep -F "Verified using v3.1 scheme (APK Signature Scheme v3.1): false" delivery/signature.txt
+          grep -F "Verified using v4 scheme (APK Signature Scheme v4): false" delivery/signature.txt
           grep -F "certificate SHA-256 digest: $EXPECTED_HASH" delivery/signature.txt
           "$TOOLS/zipalign" -c -p 4 "$APK"
           "$TOOLS/aapt" dump badging "$APK" > delivery/package.txt
@@ -120,6 +125,8 @@ jobs:
           apk = next(pathlib.Path('delivery').glob('*.apk'))
           result = {}
           with zipfile.ZipFile(apk) as z:
+              jar_signatures = [n for n in z.namelist() if n.upper().startswith('META-INF/') and n.upper().endswith(('.SF', '.RSA', '.DSA', '.EC'))]
+              assert not jar_signatures, jar_signatures
               for abi, target in [('arm64-v8a','aarch64-linux-android'),('x86_64','x86_64-linux-android'),('riscv64','riscv64-linux-android')]:
                   data = z.read(f'lib/{abi}/libksud.so')
                   assert len(data) > 100000
@@ -146,7 +153,7 @@ jobs:
         run: |
           rm -f "$RUNNER_TEMP/cloud.jks"
           git checkout -- manager/gradle.properties
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: KernelSU-op-ultra-plus-cloud-signed
           path: delivery/

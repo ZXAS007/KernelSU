@@ -22,10 +22,68 @@ index 2069a932..ec1c5eb6 100644
            export KSU_PACKAGE_NAME="me.weishu.kernelsu.pr"
          fi
 diff --git a/manager/app/build.gradle.kts b/manager/app/build.gradle.kts
-index 79662358..572fa2fc 100644
+index 79662358..31e11239 100644
 --- a/manager/app/build.gradle.kts
 +++ b/manager/app/build.gradle.kts
-@@ -114,6 +114,7 @@ android {
+@@ -6,7 +6,6 @@ plugins {
+     alias(libs.plugins.agp.app)
+     alias(libs.plugins.compose.compiler)
+     alias(libs.plugins.kotlin.serialization)
+-    alias(libs.plugins.lsplugin.apksign)
+     alias(libs.plugins.protobuf)
+     id("kotlin-parcelize")
+ }
+@@ -28,13 +27,6 @@ val defaultManagerName = if (isPrBuild) "KernelSU PR" else "KernelSU"
+ val managerPackageName = project.findProperty("KSU_PACKAGE_NAME")?.toString() ?: defaultManagerPackageName
+ val managerName = project.findProperty("KSU_NAME")?.toString() ?: defaultManagerName
+
+-apksign {
+-    storeFileProperty = "KEYSTORE_FILE"
+-    storePasswordProperty = "KEYSTORE_PASSWORD"
+-    keyAliasProperty = "KEY_ALIAS"
+-    keyPasswordProperty = "KEY_PASSWORD"
+-}
+-
+ protobuf {
+     protoc {
+         artifact = libs.protobuf.protoc.get().toString()
+@@ -63,6 +55,20 @@ val baseCppFlags = baseCFlags + "-fno-rtti"
+ android {
+     namespace = "me.weishu.kernelsu"
+
++    val cloudKeystore = providers.gradleProperty("KEYSTORE_FILE").orNull
++    val cloudSigning = cloudKeystore?.let {
++        signingConfigs.create("cloud") {
++            storeFile = file(it)
++            storePassword = providers.gradleProperty("KEYSTORE_PASSWORD").get()
++            keyAlias = providers.gradleProperty("KEY_ALIAS").get()
++            keyPassword = providers.gradleProperty("KEY_PASSWORD").get()
++            enableV1Signing = false
++            enableV2Signing = true
++            enableV3Signing = false
++            enableV4Signing = false
++        }
++    }
++
+     buildTypes {
+         debug {
+             externalNativeBuild {
+@@ -72,13 +78,13 @@ android {
+             }
+         }
+         release {
++            signingConfig = cloudSigning ?: signingConfigs.getByName("debug")
+             isMinifyEnabled = true
+             isShrinkResources = true
+             vcsInfo.include = false
+             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+             externalNativeBuild {
+                 cmake {
+-                    arguments += "-DDEBUG_SYMBOLS_PATH=${layout.buildDirectory.get().asFile.absolutePath}/symbols"
+                     arguments += "-DCMAKE_BUILD_TYPE=Release"
+
+                     val releaseFlags = listOf(
+@@ -114,6 +120,7 @@ android {
          }
          jniLibs {
              useLegacyPackaging = true
@@ -61,7 +119,7 @@ index 9fbe90ce..3a2f1d81 100644
 @@ -259,6 +259,13 @@ fun SettingPagerMiuix(
                                  onCheckedChange = actions.onSetKernelUmountEnabled
                              )
- 
+
 +                            SwitchPreference(
 +                                title = stringResource(R.string.settings_selinux_enforcing),
 +                                summary = stringResource(R.string.settings_selinux_session_summary),
@@ -91,7 +149,7 @@ index 04865d16..d1900e03 100644
 @@ -35,6 +35,8 @@ data class SettingsUiState(
      val kernelUmountStatus: String = "",
      val isKernelUmountEnabled: Boolean = false,
- 
+
 +    val selinuxEnforcing: Boolean? = null,
 +    val selinuxBusy: Boolean = false,
      // SELinux Hide
@@ -140,7 +198,7 @@ index a7e191dd..1743cf22 100644
 @@ -33,6 +34,15 @@ class HomeViewModel(
      private val _uiState = MutableStateFlow(buildState())
      val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
- 
+
 +    init {
 +        viewModelScope.launch {
 +            SelinuxStateChanges.changes.collect {
@@ -167,7 +225,7 @@ index 48911c92..1919902b 100644
  import me.weishu.kernelsu.R
  import me.weishu.kernelsu.data.repository.SettingsRepository
 @@ -32,6 +34,7 @@ class SettingsViewModel(
- 
+
      fun refresh() {
          viewModelScope.launch {
 +            val selinuxEnforcing = withContext(Dispatchers.IO) { readSelinuxEnforcing() }
@@ -175,7 +233,7 @@ index 48911c92..1919902b 100644
              val checkModuleUpdate = repo.checkModuleUpdate
              val themeMode = repo.themeMode
 @@ -94,6 +97,7 @@ class SettingsViewModel(
- 
+
              _uiState.update {
                  it.copy(
 +                    selinuxEnforcing = if (it.selinuxBusy) it.selinuxEnforcing else selinuxEnforcing,
@@ -185,7 +243,7 @@ index 48911c92..1919902b 100644
 @@ -135,6 +139,39 @@ class SettingsViewModel(
          }
      }
- 
+
 +    private fun readSelinuxEnforcing(): Boolean? = runCatching {
 +        val result = getRootShell().newJob()
 +            .add("/system/bin/getenforce").to(ArrayList<String>(), null).exec()
@@ -252,16 +310,27 @@ index 0e1db37f..7b6cbf5c 100644
 +++ b/manager/build.gradle.kts
 @@ -16,12 +16,12 @@ extra["managerVersionCode"] = getVersionCode()
  extra["managerVersionName"] = getVersionName()
- 
+
  fun getGitCommitCount(): Int {
 -    val process = Runtime.getRuntime().exec(arrayOf("git", "rev-list", "--count", "HEAD"))
 +    val process = Runtime.getRuntime().exec(arrayOf("git", "-C", rootDir.parentFile.absolutePath, "rev-list", "--count", "HEAD"))
      return process.inputStream.bufferedReader().use { it.readText().trim().toInt() }
  }
- 
+
  fun getGitDescribe(): String {
 -    val process = Runtime.getRuntime().exec(arrayOf("git", "describe", "--tags", "--always"))
 +    val process = Runtime.getRuntime().exec(arrayOf("git", "-C", rootDir.parentFile.absolutePath, "describe", "--tags", "--always"))
      return process.inputStream.bufferedReader().use { it.readText().trim() }
  }
- 
+
+diff --git a/manager/gradle.properties b/manager/gradle.properties
+index db2ab30b..9cd24805 100644
+--- a/manager/gradle.properties
++++ b/manager/gradle.properties
+@@ -7,3 +7,6 @@ org.gradle.tooling.parallel=true
+ org.gradle.vfs.watch=true
+ android.r8.maxWorkers=4
+ android.native.buildOutput=verbose
++
++# AGP-supported suppression for the intentional R8 worker limit.
++android.sync.suppressAgpWarnings=UNSUPPORTED_PROJECT_OPTION_USE
