@@ -114,6 +114,7 @@ android {
         }
         jniLibs {
             useLegacyPackaging = true
+            keepDebugSymbols += "**/libksud.so"
             excludes += "lib/*/libandroidx.graphics.path.so"
         }
     }

@@ -335,4 +335,7 @@
     <string name="nav_rail_collapse">Collapse navigation rail</string>
     <string name="settings_navigation_badge">Navigation badge</string>
     <string name="settings_navigation_badge_summary">Show granted app and enabled module counts on the navigation bar</string>
+    <string name="settings_selinux_enforcing">SELinux enforcing</string>
+    <string name="settings_selinux_toggle_failed">Failed to switch SELinux mode; check Root access and kernel support</string>
+    <string name="settings_selinux_session_summary">Changes apply only to the current session</string>
 </resources>

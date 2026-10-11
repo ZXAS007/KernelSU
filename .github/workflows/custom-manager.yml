@@ -1,0 +1,153 @@
+name: Custom Manager Cloud
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  certificate:
+    runs-on: ubuntu-latest
+    outputs:
+      size: ${{ steps.cert.outputs.size }}
+      hash: ${{ steps.cert.outputs.hash }}
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Export public certificate
+        id: cert
+        env:
+          KEYSTORE: ${{ secrets.KSU_CLOUD_KEYSTORE }}
+          PASSWORD: ${{ secrets.KSU_CLOUD_PASSWORD }}
+        run: |
+          umask 077
+          test -n "$KEYSTORE" && test -n "$PASSWORD"
+          printf '%s' "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/cloud.jks"
+          keytool -exportcert -alias cloud-manager -keystore "$RUNNER_TEMP/cloud.jks" -storepass:env PASSWORD -file certificate.der
+          printf 'size=0x%04x\n' "$(stat -c%s certificate.der)" >> "$GITHUB_OUTPUT"
+          printf 'hash=%s\n' "$(sha256sum certificate.der | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
+          rm "$RUNNER_TEMP/cloud.jks"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cloud-public-certificate
+          path: certificate.der
+  lkm:
+    needs: certificate
+    uses: ./.github/workflows/build-lkm.yml
+    with:
+      package_name: op.ultra.plus
+      expected_size: ${{ needs.certificate.outputs.size }}
+      expected_hash: ${{ needs.certificate.outputs.hash }}
+  ksuinit:
+    uses: ./.github/workflows/ksuinit.yml
+  ksud:
+    needs: [lkm, ksuinit]
+    strategy:
+      matrix:
+        target: [aarch64-linux-android, x86_64-linux-android, riscv64-linux-android]
+    uses: ./.github/workflows/ksud.yml
+    with:
+      target: ${{ matrix.target }}
+      pack_lkm: true
+      pack_ksuinit: true
+      package_name: op.ultra.plus
+  manager:
+    needs: [certificate, ksud]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ksud-*
+          path: payload
+      - name: Place freshly built payload
+        run: |
+          mkdir -p manager/app/src/main/jniLibs/{arm64-v8a,x86_64,riscv64}
+          cp payload/ksud-aarch64-linux-android/ksud manager/app/src/main/jniLibs/arm64-v8a/libksud.so
+          cp payload/ksud-x86_64-linux-android/ksud manager/app/src/main/jniLibs/x86_64/libksud.so
+          cp payload/ksud-riscv64-linux-android/ksud manager/app/src/main/jniLibs/riscv64/libksud.so
+      - name: Configure cloud signing
+        env:
+          KEYSTORE: ${{ secrets.KSU_CLOUD_KEYSTORE }}
+          PASSWORD: ${{ secrets.KSU_CLOUD_PASSWORD }}
+        run: |
+          umask 077
+          test -n "$KEYSTORE" && test -n "$PASSWORD"
+          printf '%s' "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/cloud.jks"
+          {
+            printf 'KEYSTORE_FILE=%s\n' "$RUNNER_TEMP/cloud.jks"
+            printf 'KEYSTORE_PASSWORD=%s\nKEY_PASSWORD=%s\n' "$PASSWORD" "$PASSWORD"
+            printf 'KEY_ALIAS=cloud-manager\n'
+          } >> manager/gradle.properties
+      - name: Build signed manager with matched LKM
+        working-directory: manager
+        run: |
+          chmod +x gradlew
+          ./gradlew clean assembleRelease -PKSU_PACKAGE_NAME=op.ultra.plus
+      - name: Sign final APK with cloud certificate
+        env:
+          PASSWORD: ${{ secrets.KSU_CLOUD_PASSWORD }}
+        run: |
+          TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n1)
+          APK=$(find manager/app/build/outputs/apk/release -name '*.apk' | head -n1)
+          "$TOOLS/zipalign" -f -p 4 "$APK" "$RUNNER_TEMP/aligned.apk"
+          "$TOOLS/apksigner" sign --ks "$RUNNER_TEMP/cloud.jks" --ks-key-alias cloud-manager --ks-pass env:PASSWORD --key-pass env:PASSWORD --out "$APK" "$RUNNER_TEMP/aligned.apk"
+      - name: Verify final APK and record provenance
+
+        env:
+          EXPECTED_HASH: ${{ needs.certificate.outputs.hash }}
+          EXPECTED_SIZE: ${{ needs.certificate.outputs.size }}
+        run: |
+          mkdir -p delivery
+          cp manager/app/build/outputs/apk/release/*.apk delivery/
+          APK=$(find delivery -name '*.apk' | head -n1)
+          TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n1)
+          "$TOOLS/apksigner" verify --verbose --print-certs "$APK" | tee delivery/signature.txt
+          grep -F "certificate SHA-256 digest: $EXPECTED_HASH" delivery/signature.txt
+          "$TOOLS/zipalign" -c -p 4 "$APK"
+          "$TOOLS/aapt" dump badging "$APK" > delivery/package.txt
+          grep -F "package: name='op.ultra.plus'" delivery/package.txt
+          unzip -t "$APK" | tail -n1
+          python3 - <<'PY'
+          import pathlib, zipfile, hashlib, json
+          apk = next(pathlib.Path('delivery').glob('*.apk'))
+          result = {}
+          with zipfile.ZipFile(apk) as z:
+              for abi, target in [('arm64-v8a','aarch64-linux-android'),('x86_64','x86_64-linux-android'),('riscv64','riscv64-linux-android')]:
+                  data = z.read(f'lib/{abi}/libksud.so')
+                  assert len(data) > 100000
+                  assert data == pathlib.Path(f'payload/ksud-{target}/ksud').read_bytes(), abi
+                  result[abi] = hashlib.sha256(data).hexdigest()
+          pathlib.Path('delivery/payload.json').write_text(json.dumps(result, indent=2))
+          PY
+          {
+            if [ -f sync-provenance.json ]; then
+              cat sync-provenance.json
+            else
+              echo 'Upstream run: 38137972875'
+              echo 'Source base: 1ba1ae693e1e92563dcb2a181eadd949330da7f1'
+            fi
+            printf 'Custom commit: '; git rev-parse HEAD
+            echo "Manager certificate / LKM expected hash: $EXPECTED_HASH"
+            echo "Certificate DER size / LKM expected size: $EXPECTED_SIZE"
+            echo 'Manager and ksud package: op.ultra.plus'
+            echo "Actions run: $GITHUB_RUN_ID"
+          } > delivery/provenance.txt
+          (cd delivery && sha256sum *.apk > SHA256SUMS)
+      - name: Remove runner signing files
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/cloud.jks"
+          git checkout -- manager/gradle.properties
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KernelSU-op-ultra-plus-cloud-signed
+          path: delivery/
+          if-no-files-found: error
