@@ -1,0 +1,267 @@
+diff --git a/.github/workflows/ksud.yml b/.github/workflows/ksud.yml
+index 2069a932..ec1c5eb6 100644
+--- a/.github/workflows/ksud.yml
++++ b/.github/workflows/ksud.yml
+@@ -13,6 +13,10 @@ on:
+         required: false
+         type: boolean
+         default: false
++      package_name:
++        required: false
++        type: string
++        default: op.ultra.plus
+ jobs:
+   build:
+     runs-on: ubuntu-latest
+@@ -60,6 +64,7 @@ jobs:
+       env:
+         ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+       run: |
++        export KSU_PACKAGE_NAME="${{ inputs.package_name }}"
+         if [ "${{ github.event_name }}" = "pull_request" ]; then
+           export KSU_PACKAGE_NAME="me.weishu.kernelsu.pr"
+         fi
+diff --git a/manager/app/build.gradle.kts b/manager/app/build.gradle.kts
+index 79662358..572fa2fc 100644
+--- a/manager/app/build.gradle.kts
++++ b/manager/app/build.gradle.kts
+@@ -114,6 +114,7 @@ android {
+         }
+         jniLibs {
+             useLegacyPackaging = true
++            keepDebugSymbols += "**/libksud.so"
+             excludes += "lib/*/libandroidx.graphics.path.so"
+         }
+     }
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsMaterial.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsMaterial.kt
+index 1d3de8ff..922f7cec 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsMaterial.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsMaterial.kt
+@@ -214,6 +214,16 @@ fun SettingPagerMaterial(
+                                 onCheckedChange = actions.onSetKernelUmountEnabled
+                             )
+                         },
++                        {
++                            SegmentedSwitchItem(
++                                icon = Icons.Filled.Security,
++                                title = stringResource(R.string.settings_selinux_enforcing),
++                                summary = stringResource(R.string.settings_selinux_session_summary),
++                                enabled = uiState.selinuxEnforcing != null && !uiState.selinuxBusy,
++                                checked = uiState.selinuxEnforcing == true,
++                                onCheckedChange = actions.onSetSelinuxEnforcing
++                            )
++                        },
+                         {
+                             val selinuxHideSummary = when (uiState.selinuxHideStatus) {
+                                 "unsupported" -> stringResource(id = R.string.feature_status_unsupported_summary)
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsMiuix.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsMiuix.kt
+index 9fbe90ce..3a2f1d81 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsMiuix.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsMiuix.kt
+@@ -259,6 +259,13 @@ fun SettingPagerMiuix(
+                                 onCheckedChange = actions.onSetKernelUmountEnabled
+                             )
+ 
++                            SwitchPreference(
++                                title = stringResource(R.string.settings_selinux_enforcing),
++                                summary = stringResource(R.string.settings_selinux_session_summary),
++                                enabled = uiState.selinuxEnforcing != null && !uiState.selinuxBusy,
++                                checked = uiState.selinuxEnforcing == true,
++                                onCheckedChange = actions.onSetSelinuxEnforcing
++                            )
+                             val selinuxHideSummary = when (uiState.selinuxHideStatus) {
+                                 "unsupported" -> stringResource(id = R.string.feature_status_unsupported_summary)
+                                 "managed" -> stringResource(id = R.string.feature_status_managed_summary)
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsScreen.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsScreen.kt
+index b2116d5a..12595528 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsScreen.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsScreen.kt
+@@ -52,6 +52,7 @@ fun SettingPager(
+         onOpenProfileTemplate = { navigator.push(Route.AppProfileTemplate) },
+         onSetSuCompatMode = viewModel::setSuCompatMode,
+         onSetKernelUmountEnabled = viewModel::setKernelUmountEnabled,
++        onSetSelinuxEnforcing = viewModel::setSelinuxEnforcing,
+         onSetSelinuxHideEnabled = viewModel::setSelinuxHideEnabled,
+         onSetSulogEnabled = viewModel::setSulogEnabled,
+         onSetAdbRootEnabled = viewModel::setAdbRootEnabled,
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsUiState.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsUiState.kt
+index 04865d16..d1900e03 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsUiState.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsUiState.kt
+@@ -35,6 +35,8 @@ data class SettingsUiState(
+     val kernelUmountStatus: String = "",
+     val isKernelUmountEnabled: Boolean = false,
+ 
++    val selinuxEnforcing: Boolean? = null,
++    val selinuxBusy: Boolean = false,
+     // SELinux Hide
+     val selinuxHideStatus: String = "",
+     val isSelinuxHideEnabled: Boolean = false,
+@@ -73,6 +75,7 @@ data class SettingsScreenActions(
+     val onOpenProfileTemplate: () -> Unit,
+     val onSetSuCompatMode: (Int) -> Unit,
+     val onSetKernelUmountEnabled: (Boolean) -> Unit,
++    val onSetSelinuxEnforcing: (Boolean) -> Unit,
+     val onSetSelinuxHideEnabled: (Boolean) -> Unit,
+     val onSetSulogEnabled: (Boolean) -> Unit,
+     val onSetAdbRootEnabled: (Boolean) -> Unit,
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/util/SelinuxStateChanges.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/util/SelinuxStateChanges.kt
+new file mode 100644
+index 00000000..58716a6f
+--- /dev/null
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/util/SelinuxStateChanges.kt
+@@ -0,0 +1,14 @@
++package me.weishu.kernelsu.ui.util
++
++import kotlinx.coroutines.flow.MutableStateFlow
++import kotlinx.coroutines.flow.asStateFlow
++import kotlinx.coroutines.flow.update
++
++object SelinuxStateChanges {
++    private val revision = MutableStateFlow(0L)
++    val changes = revision.asStateFlow()
++
++    fun notifyChanged() {
++        revision.update { it + 1 }
++    }
++}
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/viewmodel/HomeViewModel.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/viewmodel/HomeViewModel.kt
+index a7e191dd..1743cf22 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/ui/viewmodel/HomeViewModel.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/viewmodel/HomeViewModel.kt
+@@ -21,6 +21,7 @@ import me.weishu.kernelsu.ui.screen.home.HomeUiState
+ import me.weishu.kernelsu.ui.screen.home.SystemInfo
+ import me.weishu.kernelsu.ui.screen.home.getManagerVersion
+ import me.weishu.kernelsu.ui.util.checkNewVersion
++import me.weishu.kernelsu.ui.util.SelinuxStateChanges
+ import me.weishu.kernelsu.ui.util.getSELinuxStatusRaw
+ import me.weishu.kernelsu.ui.util.module.LatestVersionInfo
+ import me.weishu.kernelsu.ui.util.resolveDeviceName
+@@ -33,6 +34,15 @@ class HomeViewModel(
+     private val _uiState = MutableStateFlow(buildState())
+     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
+ 
++    init {
++        viewModelScope.launch {
++            SelinuxStateChanges.changes.collect {
++                val status = withContext(Dispatchers.IO) { getSELinuxStatusRaw() }
++                _uiState.update { it.copy(systemInfo = it.systemInfo.copy(selinuxStatus = status)) }
++            }
++        }
++    }
++
+     fun refresh() {
+         viewModelScope.launch {
+             val baseState = withContext(Dispatchers.IO) { buildState() }
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/viewmodel/SettingsViewModel.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/viewmodel/SettingsViewModel.kt
+index 48911c92..1919902b 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/ui/viewmodel/SettingsViewModel.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/viewmodel/SettingsViewModel.kt
+@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.asStateFlow
+ import kotlinx.coroutines.flow.update
+ import kotlinx.coroutines.launch
+ import kotlinx.coroutines.withContext
++import me.weishu.kernelsu.ui.util.SelinuxStateChanges
++import me.weishu.kernelsu.ui.util.getRootShell
+ import me.weishu.kernelsu.Natives
+ import me.weishu.kernelsu.R
+ import me.weishu.kernelsu.data.repository.SettingsRepository
+@@ -32,6 +34,7 @@ class SettingsViewModel(
+ 
+     fun refresh() {
+         viewModelScope.launch {
++            val selinuxEnforcing = withContext(Dispatchers.IO) { readSelinuxEnforcing() }
+             val checkUpdate = repo.checkUpdate
+             val checkModuleUpdate = repo.checkModuleUpdate
+             val themeMode = repo.themeMode
+@@ -94,6 +97,7 @@ class SettingsViewModel(
+ 
+             _uiState.update {
+                 it.copy(
++                    selinuxEnforcing = if (it.selinuxBusy) it.selinuxEnforcing else selinuxEnforcing,
+                     uiMode = uiMode,
+                     checkUpdate = checkUpdate,
+                     checkModuleUpdate = checkModuleUpdate,
+@@ -135,6 +139,39 @@ class SettingsViewModel(
+         }
+     }
+ 
++    private fun readSelinuxEnforcing(): Boolean? = runCatching {
++        val result = getRootShell().newJob()
++            .add("/system/bin/getenforce").to(ArrayList<String>(), null).exec()
++        if (!result.isSuccess) return@runCatching null
++        when (result.out.firstOrNull()?.trim()) {
++            "Enforcing" -> true
++            "Permissive" -> false
++            else -> null
++        }
++    }.getOrNull()
++
++    fun setSelinuxEnforcing(enabled: Boolean) {
++        if (_uiState.value.selinuxBusy || _uiState.value.selinuxEnforcing == null) return
++        _uiState.update { it.copy(selinuxBusy = true) }
++        viewModelScope.launch {
++            val (success, actual) = withContext(Dispatchers.IO) {
++                val success = runCatching {
++                    getRootShell().newJob()
++                        .add("/system/bin/setenforce ${if (enabled) 1 else 0}")
++                        .exec().isSuccess
++                }.getOrDefault(false)
++                success to readSelinuxEnforcing()
++            }
++            _uiState.update { it.copy(selinuxEnforcing = actual, selinuxBusy = false) }
++            if (success && actual == enabled) {
++                SelinuxStateChanges.notifyChanged()
++            }
++            if (!success || actual != enabled) {
++                Toast.makeText(ksuApp, R.string.settings_selinux_toggle_failed, Toast.LENGTH_LONG).show()
++            }
++        }
++    }
++
+     fun setCheckUpdate(enabled: Boolean) {
+         repo.checkUpdate = enabled
+         _uiState.update { it.copy(checkUpdate = enabled) }
+diff --git a/manager/app/src/main/res/values-zh-rCN/strings.xml b/manager/app/src/main/res/values-zh-rCN/strings.xml
+index 85ffffb9..395bb3f2 100644
+--- a/manager/app/src/main/res/values-zh-rCN/strings.xml
++++ b/manager/app/src/main/res/values-zh-rCN/strings.xml
+@@ -331,4 +331,7 @@
+     <string name="nav_rail_collapse">收起导航栏</string>
+     <string name="settings_navigation_badge">导航栏角标</string>
+     <string name="settings_navigation_badge_summary">在导航栏显示已授权应用和已启用模块数量</string>
++    <string name="settings_selinux_enforcing">SELinux 强制模式</string>
++    <string name="settings_selinux_toggle_failed">SELinux 模式切换失败，请检查 Root 权限与内核支持</string>
++    <string name="settings_selinux_session_summary">切换仅本次运行有效</string>
+ </resources>
+diff --git a/manager/app/src/main/res/values/strings.xml b/manager/app/src/main/res/values/strings.xml
+index f8065548..26006a71 100644
+--- a/manager/app/src/main/res/values/strings.xml
++++ b/manager/app/src/main/res/values/strings.xml
+@@ -337,4 +337,7 @@
+     <string name="nav_rail_collapse">Collapse navigation rail</string>
+     <string name="settings_navigation_badge">Navigation badge</string>
+     <string name="settings_navigation_badge_summary">Show granted app and enabled module counts on the navigation bar</string>
++    <string name="settings_selinux_enforcing">SELinux enforcing</string>
++    <string name="settings_selinux_toggle_failed">Failed to switch SELinux mode; check Root access and kernel support</string>
++    <string name="settings_selinux_session_summary">Changes apply only to the current session</string>
+ </resources>
+diff --git a/manager/build.gradle.kts b/manager/build.gradle.kts
+index 0e1db37f..7b6cbf5c 100644
+--- a/manager/build.gradle.kts
++++ b/manager/build.gradle.kts
+@@ -16,12 +16,12 @@ extra["managerVersionCode"] = getVersionCode()
+ extra["managerVersionName"] = getVersionName()
+ 
+ fun getGitCommitCount(): Int {
+-    val process = Runtime.getRuntime().exec(arrayOf("git", "rev-list", "--count", "HEAD"))
++    val process = Runtime.getRuntime().exec(arrayOf("git", "-C", rootDir.parentFile.absolutePath, "rev-list", "--count", "HEAD"))
+     return process.inputStream.bufferedReader().use { it.readText().trim().toInt() }
+ }
+ 
+ fun getGitDescribe(): String {
+-    val process = Runtime.getRuntime().exec(arrayOf("git", "describe", "--tags", "--always"))
++    val process = Runtime.getRuntime().exec(arrayOf("git", "-C", rootDir.parentFile.absolutePath, "describe", "--tags", "--always"))
+     return process.inputStream.bufferedReader().use { it.readText().trim() }
+ }
+ 

@@ -128,8 +128,12 @@ jobs:
           pathlib.Path('delivery/payload.json').write_text(json.dumps(result, indent=2))
           PY
           {
-            echo 'Upstream run: 38137972875'
-            echo 'Source base: 1ba1ae693e1e92563dcb2a181eadd949330da7f1'
+            if [ -f sync-provenance.json ]; then
+              cat sync-provenance.json
+            else
+              echo 'Upstream run: 38137972875'
+              echo 'Source base: 1ba1ae693e1e92563dcb2a181eadd949330da7f1'
+            fi
             printf 'Custom commit: '; git rev-parse HEAD
             echo "Manager certificate / LKM expected hash: $EXPECTED_HASH"
             echo "Certificate DER size / LKM expected size: $EXPECTED_SIZE"
