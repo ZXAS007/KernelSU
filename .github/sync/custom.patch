@@ -1,8 +1,21 @@
+diff --git a/.github/workflows/ddk-lkm.yml b/.github/workflows/ddk-lkm.yml
+index 2e2e6773..7b3fbaea 100644
+--- a/.github/workflows/ddk-lkm.yml
++++ b/.github/workflows/ddk-lkm.yml
+@@ -31,7 +31,7 @@ on:
+ jobs:
+   build-kernelsu-ko:
+     name: Build kernelsu.ko for ${{ inputs.kmi }}
+-    runs-on: ubuntu-latest
++    runs-on: ubuntu-24.04
+     container:
+       image: ghcr.io/ylarod/ddk-min:${{ inputs.kmi }}-${{ inputs.ddk_release }}
+       options: --privileged
 diff --git a/.github/workflows/ksud.yml b/.github/workflows/ksud.yml
-index 2069a932..ec1c5eb6 100644
+index 2069a932..1b228985 100644
 --- a/.github/workflows/ksud.yml
 +++ b/.github/workflows/ksud.yml
-@@ -13,6 +13,10 @@ on:
+@@ -13,9 +13,13 @@ on:
          required: false
          type: boolean
          default: false
@@ -12,7 +25,11 @@ index 2069a932..ec1c5eb6 100644
 +        default: op.ultra.plus
  jobs:
    build:
-     runs-on: ubuntu-latest
+-    runs-on: ubuntu-latest
++    runs-on: ubuntu-24.04
+     steps:
+     - uses: actions/checkout@v7
+       with:
 @@ -60,6 +64,7 @@ jobs:
        env:
          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
