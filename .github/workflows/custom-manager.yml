@@ -4,50 +4,6 @@ on:
 permissions:
   contents: read
 jobs:
-  manager:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-      - uses: gradle/actions/setup-gradle@v4
-      - name: Fetch payload from specified upstream run
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh run download 38137972875 --repo tiann/KernelSU --name manager --dir upstream-manager
-          python3 - <<'PY'
-          import pathlib, zipfile, hashlib
-          apk = next(pathlib.Path('upstream-manager').glob('*.apk'))
-          assert hashlib.sha256(apk.read_bytes()).hexdigest() == '90c57bc911ca7014d26953ce7b821a9f4e15f7137caea3ed53ede68c0dac3639'
-          with zipfile.ZipFile(apk) as z:
-              for abi in ['arm64-v8a', 'x86_64', 'riscv64']:
-                  data = z.read(f'lib/{abi}/libksud.so')
-                  assert len(data) > 100000
-                  dest = pathlib.Path(f'manager/app/src/main/jniLibs/{abi}/libksud.so')
-                  dest.parent.mkdir(parents=True, exist_ok=True)
-                  dest.write_bytes(data)
-          PY
-      - name: Build custom manager
-        working-directory: manager
-        run: |
-          chmod +x gradlew
-          ./gradlew clean assembleRelease -PKSU_PACKAGE_NAME=op.ultra.plus
-      - name: Record provenance and verify payload
-        run: |
-          git rev-parse HEAD > source-commit.txt
-          echo 'Upstream run: 38137972875; source: 1ba1ae693e1e92563dcb2a181eadd949330da7f1' >> source-commit.txt
-          apk=$(find manager/app/build/outputs/apk/release -name '*.apk' | head -n 1)
-          unzip -Z1 "$apk" | grep -qx 'lib/arm64-v8a/libksud.so'
-          sha256sum manager/app/build/outputs/apk/release/*.apk > SHA256SUMS
-      - uses: actions/upload-artifact@v4
-        with:
-          name: KernelSU-op-ultra-plus-selinux-ui
-          path: |
-            manager/app/build/outputs/apk/release/*.apk
-            source-commit.txt
-            SHA256SUMS
+  build:
+    uses: ./.github/workflows/build-manager.yml
+    secrets: inherit

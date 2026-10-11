@@ -41,11 +41,11 @@ jobs:
   generate-key:
     runs-on: ubuntu-latest
     outputs:
-      expected_size: ${{ steps.extract.outputs.expected_size }}
-      expected_hash: ${{ steps.extract.outputs.expected_hash }}
-      keystore: ${{ steps.gen.outputs.keystore }}
-      keystore_password: ${{ steps.gen.outputs.keystore_password }}
-      key_password: ${{ steps.gen.outputs.key_password }}
+      expected_size: ${{ steps.prepare.outputs.expected_size }}
+      expected_hash: ${{ steps.prepare.outputs.expected_hash }}
+      keystore: ${{ steps.prepare.outputs.keystore }}
+      keystore_password: ${{ steps.prepare.outputs.keystore_password }}
+      key_password: ${{ steps.prepare.outputs.key_password }}
     steps:
       - name: Generate temporary keystore
         if: github.event_name == 'pull_request'
@@ -68,29 +68,39 @@ jobs:
 
           echo "keystore=$(base64 -w 0 pr-key.jks)" >> $GITHUB_OUTPUT
 
-      - name: Extract certificate hash and size
-        if: github.event_name == 'pull_request'
-        id: extract
+      - name: Prepare signing key and certificate metadata
+        id: prepare
         env:
-          STORE_PASS: ${{ steps.gen.outputs.keystore_password }}
+          CLOUD_KEYSTORE: ${{ secrets.KSU_CLOUD_KEYSTORE }}
+          CLOUD_PASSWORD: ${{ secrets.KSU_CLOUD_PASSWORD }}
+          PR_KEYSTORE: ${{ steps.gen.outputs.keystore }}
+          PR_PASSWORD: ${{ steps.gen.outputs.keystore_password }}
+          PR_KEY_PASSWORD: ${{ steps.gen.outputs.key_password }}
         run: |
-          # Export DER certificate
-          keytool -exportcert \
-            -alias pr-key \
-            -keystore pr-key.jks \
-            -storepass "$STORE_PASS" \
-            -file pr-cert.der
-
-          # Calculate size in hex
-          SIZE_DEC=$(stat -c%s pr-cert.der)
-          SIZE_HEX=$(printf '0x%04x' "$SIZE_DEC")
-          echo "expected_size=$SIZE_HEX" >> $GITHUB_OUTPUT
-
-          # Calculate SHA256 hash
-          HASH=$(sha256sum pr-cert.der | awk '{print $1}')
-          echo "expected_hash=$HASH" >> $GITHUB_OUTPUT
-
-          echo "Certificate size: $SIZE_HEX ($SIZE_DEC bytes)"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "$PR_KEYSTORE" | base64 -d > signing.jks
+            ALIAS=pr-key
+            PASSWORD="$PR_PASSWORD"
+            KEY_PASSWORD="$PR_KEY_PASSWORD"
+          else
+            test -n "$CLOUD_KEYSTORE"
+            test -n "$CLOUD_PASSWORD"
+            echo "$CLOUD_KEYSTORE" | base64 -d > signing.jks
+            ALIAS=cloud-manager
+            PASSWORD="$CLOUD_PASSWORD"
+            KEY_PASSWORD="$CLOUD_PASSWORD"
+          fi
+          keytool -exportcert -alias "$ALIAS" -keystore signing.jks -storepass "$PASSWORD" -file cert.der >/dev/null
+          SIZE_HEX=$(printf '0x%04x' "$(stat -c%s cert.der)")
+          HASH=$(sha256sum cert.der | awk '{print $1}')
+          {
+            echo "keystore=$(base64 -w 0 signing.jks)"
+            echo "keystore_password=$PASSWORD"
+            echo "key_password=$KEY_PASSWORD"
+            echo "expected_size=$SIZE_HEX"
+            echo "expected_hash=$HASH"
+          } >> "$GITHUB_OUTPUT"
+          echo "Certificate size: $SIZE_HEX"
           echo "Certificate hash: $HASH"
 
   build-lkm:
@@ -99,6 +109,7 @@ jobs:
     with:
       expected_size: ${{ needs.generate-key.outputs.expected_size || '' }}
       expected_hash: ${{ needs.generate-key.outputs.expected_hash || '' }}
+      package_name: op.ultra.plus
     secrets: inherit
 
   build-ksuinit:
@@ -117,6 +128,8 @@ jobs:
       target: ${{ matrix.target }}
       pack_lkm: true
       pack_ksuinit: true
+      package_name: op.ultra.plus
+    secrets: inherit
   
   build-ksud-extra:
     needs: [build-lkm, build-ksuinit]
@@ -155,16 +168,16 @@ jobs:
           fetch-depth: 0
 
       - name: Write key
-        if: ${{ ( github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' )) || github.ref_type == 'tag' }}
+        if: github.event_name != 'pull_request'
         run: |
-          if [ ! -z "${{ secrets.KEYSTORE }}" ]; then
+          if [ ! -z "${{ needs.generate-key.outputs.keystore }}" ]; then
             {
-              echo KEYSTORE_PASSWORD='${{ secrets.KEYSTORE_PASSWORD }}'
-              echo KEY_ALIAS='${{ secrets.KEY_ALIAS }}'
-              echo KEY_PASSWORD='${{ secrets.KEY_PASSWORD }}'
+              echo KEYSTORE_PASSWORD='${{ needs.generate-key.outputs.keystore_password }}'
+              echo KEY_ALIAS='cloud-manager'
+              echo KEY_PASSWORD='${{ needs.generate-key.outputs.key_password }}'
               echo KEYSTORE_FILE='key.jks'
             } >> gradle.properties
-            echo "${{ secrets.KEYSTORE }}" | base64 -d > key.jks
+            echo "${{ needs.generate-key.outputs.keystore }}" | base64 -d > key.jks
           fi
 
       - name: Write PR key
@@ -194,9 +207,9 @@ jobs:
       - name: Build with Gradle
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            ./gradlew clean assembleRelease -PIS_PR_BUILD=true
+            ./gradlew clean assembleRelease -PIS_PR_BUILD=true -PKSU_PACKAGE_NAME=op.ultra.plus
           else
-            ./gradlew clean assembleRelease
+            ./gradlew clean assembleRelease -PKSU_PACKAGE_NAME=op.ultra.plus
           fi
 
       - name: Upload build artifact
