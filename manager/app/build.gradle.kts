@@ -115,6 +115,8 @@ android {
         jniLibs {
             useLegacyPackaging = true
             excludes += "lib/*/libandroidx.graphics.path.so"
+            // ksud is a signed-build payload; preserve the exact downloaded binary.
+            keepDebugSymbols += "**/libksud.so"
         }
     }
 
