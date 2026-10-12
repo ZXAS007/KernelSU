@@ -215,12 +215,11 @@ fun SettingPagerMaterial(
                         },
                         {
                             SegmentedSwitchItem(
-                                icon = Icons.Filled.Security,
+                                icon = Icons.Filled.AdminPanelSettings,
                                 title = stringResource(R.string.settings_selinux_enforcing),
                                 summary = when (uiState.selinuxEnforcing) {
-                                    true -> stringResource(R.string.settings_selinux_enforcing_summary)
-                                    false -> stringResource(R.string.settings_selinux_permissive_summary)
                                     null -> stringResource(R.string.settings_selinux_unavailable_summary)
+                                    else -> stringResource(R.string.settings_selinux_enforcing_summary)
                                 },
                                 enabled = uiState.selinuxEnforcing != null && !uiState.selinuxBusy,
                                 checked = uiState.selinuxEnforcing == true,
