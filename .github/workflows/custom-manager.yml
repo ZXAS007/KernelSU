@@ -10,6 +10,7 @@ jobs:
       size: ${{ steps.cert.outputs.size }}
       hash: ${{ steps.cert.outputs.hash }}
     steps:
+      - uses: actions/checkout@v7
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -24,6 +25,8 @@ jobs:
           test -n "$KEYSTORE" && test -n "$PASSWORD"
           printf '%s' "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/cloud.jks"
           keytool -exportcert -alias cloud-manager -keystore "$RUNNER_TEMP/cloud.jks" -storepass:env PASSWORD -file certificate.der
+          cmp certificate.der .github/signing/certificate.der
+          (cd .github/signing && sha256sum -c certificate.sha256)
           printf 'size=0x%04x\n' "$(stat -c%s certificate.der)" >> "$GITHUB_OUTPUT"
           printf 'hash=%s\n' "$(sha256sum certificate.der | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
           rm "$RUNNER_TEMP/cloud.jks"
@@ -94,7 +97,7 @@ jobs:
         working-directory: manager
         run: |
           chmod +x gradlew
-          ./gradlew clean assembleRelease -PKSU_PACKAGE_NAME=op.ultra.plus
+          ./gradlew clean assembleRelease -PKSU_PACKAGE_NAME=op.ultra.plus --warning-mode=fail
       - name: Sign final APK with cloud certificate
         env:
           PASSWORD: ${{ secrets.KSU_CLOUD_PASSWORD }}
@@ -127,6 +130,7 @@ jobs:
           grep -F "package: name='op.ultra.plus'" delivery/package.txt
           VERSION=$(git describe --tags --match "v[0-9]*" --long --abbrev=8)
           grep -F "versionName='$VERSION'" delivery/package.txt
+          grep -E "versionName='v[0-9]+\.[0-9]+\.[0-9]+-[0-9]+-g[0-9a-f]{8}'" delivery/package.txt
           unzip -t "$APK" | tail -n1
           python3 - <<'PY'
           import pathlib, zipfile, hashlib, json
@@ -144,8 +148,8 @@ jobs:
             if [ -f sync-provenance.json ]; then
               cat sync-provenance.json
             else
-              echo 'Upstream run: 38137972875'
-              echo 'Source base: 1ba1ae693e1e92563dcb2a181eadd949330da7f1'
+              printf 'Customization baseline: '; cat .github/sync/base.txt
+              printf 'Version: '; git describe --tags --match 'v[0-9]*' --long --abbrev=8
             fi
             printf 'Custom commit: '; git rev-parse HEAD
             echo "Manager certificate / LKM expected hash: $EXPECTED_HASH"
