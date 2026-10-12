@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: update-run-38137972875
+          ref: main
           fetch-depth: 0
           token: ${{ secrets.KSU_SYNC_TOKEN }}
       - name: Apply reviewed patch and dispatch matched build

@@ -6,7 +6,6 @@ plugins {
     alias(libs.plugins.agp.app)
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.kotlin.serialization)
-    alias(libs.plugins.lsplugin.apksign)
     alias(libs.plugins.protobuf)
     id("kotlin-parcelize")
 }
@@ -27,13 +26,6 @@ val defaultManagerPackageName = if (isPrBuild) "me.weishu.kernelsu.pr" else "me.
 val defaultManagerName = if (isPrBuild) "KernelSU PR" else "KernelSU"
 val managerPackageName = project.findProperty("KSU_PACKAGE_NAME")?.toString() ?: defaultManagerPackageName
 val managerName = project.findProperty("KSU_NAME")?.toString() ?: defaultManagerName
-
-apksign {
-    storeFileProperty = "KEYSTORE_FILE"
-    storePasswordProperty = "KEYSTORE_PASSWORD"
-    keyAliasProperty = "KEY_ALIAS"
-    keyPasswordProperty = "KEY_PASSWORD"
-}
 
 protobuf {
     protoc {
@@ -63,6 +55,26 @@ val baseCppFlags = baseCFlags + "-fno-rtti"
 android {
     namespace = "me.weishu.kernelsu"
 
+    val cloudKeystore = providers.gradleProperty("KEYSTORE_FILE").orNull
+    val cloudSigning = cloudKeystore?.let {
+        signingConfigs.create("cloud") {
+            storeFile = file(it)
+            storePassword = providers.gradleProperty("KEYSTORE_PASSWORD").get()
+            keyAlias = providers.gradleProperty("KEY_ALIAS").get()
+            keyPassword = providers.gradleProperty("KEY_PASSWORD").get()
+            enableV1Signing = false
+            enableV2Signing = true
+            enableV3Signing = false
+            enableV4Signing = false
+        }
+    }
+    signingConfigs.getByName("debug") {
+        enableV1Signing = false
+        enableV2Signing = true
+        enableV3Signing = false
+        enableV4Signing = false
+    }
+
     buildTypes {
         debug {
             externalNativeBuild {
@@ -72,13 +84,13 @@ android {
             }
         }
         release {
+            signingConfig = cloudSigning ?: signingConfigs.getByName("debug")
             isMinifyEnabled = true
             isShrinkResources = true
             vcsInfo.include = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             externalNativeBuild {
                 cmake {
-                    arguments += "-DDEBUG_SYMBOLS_PATH=${layout.buildDirectory.get().asFile.absolutePath}/symbols"
                     arguments += "-DCMAKE_BUILD_TYPE=Release"
 
                     val releaseFlags = listOf(

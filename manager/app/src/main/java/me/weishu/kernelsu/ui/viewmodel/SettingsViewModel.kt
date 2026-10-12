@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import me.weishu.kernelsu.ui.util.SelinuxStateChanges
 import me.weishu.kernelsu.ui.util.getRootShell
 import me.weishu.kernelsu.Natives
 import me.weishu.kernelsu.R
@@ -154,6 +155,9 @@ class SettingsViewModel(
                 success to readSelinuxEnforcing()
             }
             _uiState.update { it.copy(selinuxEnforcing = actual, selinuxBusy = false) }
+            if (success && actual == enabled) {
+                SelinuxStateChanges.notifyChanged()
+            }
             if (!success || actual != enabled) {
                 Toast.makeText(ksuApp, R.string.settings_selinux_toggle_failed, Toast.LENGTH_LONG).show()
             }
