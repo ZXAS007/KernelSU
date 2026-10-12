@@ -16,13 +16,15 @@ extra["managerVersionCode"] = getVersionCode()
 extra["managerVersionName"] = getVersionName()
 
 fun getGitCommitCount(): Int {
-    val process = Runtime.getRuntime().exec(arrayOf("git", "rev-list", "--count", "HEAD"))
-    return process.inputStream.bufferedReader().use { it.readText().trim().toInt() }
+    return providers.exec {
+        commandLine("git", "-C", rootDir.parentFile.absolutePath, "rev-list", "--count", "HEAD")
+    }.standardOutput.asText.get().trim().toInt()
 }
 
 fun getGitDescribe(): String {
-    val process = Runtime.getRuntime().exec(arrayOf("git", "describe", "--tags", "--always"))
-    return process.inputStream.bufferedReader().use { it.readText().trim() }
+    return providers.exec {
+        commandLine("git", "-C", rootDir.parentFile.absolutePath, "describe", "--tags", "--match", "v[0-9]*", "--long", "--abbrev=8")
+    }.standardOutput.asText.get().trim()
 }
 
 fun getVersionCode(): Int {
@@ -31,5 +33,5 @@ fun getVersionCode(): Int {
 }
 
 fun getVersionName(): String {
-    return getGitDescribe()
+    return providers.gradleProperty("KSU_VERSION_NAME").orNull ?: getGitDescribe()
 }

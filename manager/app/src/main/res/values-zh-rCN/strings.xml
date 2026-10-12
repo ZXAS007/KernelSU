@@ -333,4 +333,9 @@
     <string name="nav_rail_collapse">收起导航栏</string>
     <string name="settings_navigation_badge">导航栏角标</string>
     <string name="settings_navigation_badge_summary">在导航栏显示已授权应用和已启用模块数量</string>
+    <string name="settings_selinux_enforcing">SELinux 强制模式</string>
+    <string name="settings_selinux_enforcing_summary">Enforcing（强制）· 切换仅本次运行生效</string>
+    <string name="settings_selinux_permissive_summary">Permissive（宽容）· 限制已放宽，重启后恢复系统配置</string>
+    <string name="settings_selinux_unavailable_summary">不可用 · SELinux 已禁用或无法读取状态</string>
+    <string name="settings_selinux_toggle_failed">SELinux 模式切换失败，请检查 Root 权限与内核支持</string>
 </resources>

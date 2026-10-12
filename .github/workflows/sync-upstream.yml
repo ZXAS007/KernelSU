@@ -1,0 +1,24 @@
+name: Sync successful upstream build
+on:
+  schedule:
+    - cron: '3-59/10 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: upstream-custom-sync
+  cancel-in-progress: false
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.KSU_SYNC_TOKEN }}
+      - name: Apply reviewed patch and dispatch matched build
+        env:
+          GH_TOKEN: ${{ secrets.KSU_SYNC_TOKEN }}
+        run: python3 .github/sync/sync.py

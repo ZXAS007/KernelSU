@@ -20,6 +20,7 @@ import me.weishu.kernelsu.ksuApp
 import me.weishu.kernelsu.ui.screen.home.HomeUiState
 import me.weishu.kernelsu.ui.screen.home.SystemInfo
 import me.weishu.kernelsu.ui.screen.home.getManagerVersion
+import me.weishu.kernelsu.ui.util.SelinuxStateChanges
 import me.weishu.kernelsu.ui.util.checkNewVersion
 import me.weishu.kernelsu.ui.util.getSELinuxStatusRaw
 import me.weishu.kernelsu.ui.util.module.LatestVersionInfo
@@ -32,6 +33,15 @@ class HomeViewModel(
 
     private val _uiState = MutableStateFlow(buildState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            SelinuxStateChanges.changes.collect {
+                val status = withContext(Dispatchers.IO) { getSELinuxStatusRaw() }
+                _uiState.update { it.copy(systemInfo = it.systemInfo.copy(selinuxStatus = status)) }
+            }
+        }
+    }
 
     fun refresh() {
         viewModelScope.launch {
