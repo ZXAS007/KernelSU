@@ -28,7 +28,9 @@ if os.environ.get('SYNC_DRY_RUN') != '1' and run('git', 'ls-remote', '--heads', 
         run('gh', 'workflow', 'run', 'custom-manager.yml', '--repo', repo, '--ref', branch)
         print('Retry dispatched:', branch)
     raise SystemExit(0)
-run('git', 'fetch', '--tags', 'https://github.com/tiann/KernelSU.git', sha)
+baseline = (ROOT / '.github/sync/base.txt').read_text().strip()
+print('Selected successful upstream build:', source['id'], sha, flush=True)
+run('git', 'fetch', '--tags', 'https://github.com/tiann/KernelSU.git', baseline, sha)
 with tempfile.TemporaryDirectory(prefix='ksu-sync-', dir=ROOT.parent) as tmp:
     target = pathlib.Path(tmp) / 'source'
     run('git', 'worktree', 'add', '--detach', str(target), sha)
@@ -36,8 +38,11 @@ with tempfile.TemporaryDirectory(prefix='ksu-sync-', dir=ROOT.parent) as tmp:
         run('git', 'apply', '--3way', str(ROOT / '.github/sync/custom.patch'), cwd=target)
         run('git', 'diff', '--check', cwd=target)
         run('git', 'diff', '--cached', '--check', cwd=target)
+        import shutil
+        shutil.copytree(ROOT / '.github/sync', target / '.github/sync', dirs_exist_ok=True, ignore=shutil.ignore_patterns('__pycache__'))
+        shutil.copyfile(ROOT / '.github/workflows/sync-upstream.yml', target / '.github/workflows/sync-upstream.yml')
         workflow = target / '.github/workflows/custom-manager.yml'
-        workflow.write_bytes((ROOT / '.github/workflows/custom-manager.yml').read_bytes())
+        workflow.write_bytes(run('git', 'show', 'HEAD:.github/workflows/custom-manager.yml').encode() + b'\n')
         metadata = dict(upstream_repo='tiann/KernelSU', upstream_sha=sha, upstream_run=source['id'], upstream_url=source['html_url'], customization_sha=run('git', 'rev-parse', 'HEAD'))
         (target / 'sync-provenance.json').write_text(json.dumps(metadata, indent=2) + '\n')
         run('git', 'config', 'user.name', 'KernelSU sync bot', cwd=target)
@@ -46,6 +51,10 @@ with tempfile.TemporaryDirectory(prefix='ksu-sync-', dir=ROOT.parent) as tmp:
         run('git', 'commit', '-m', 'Apply customization to upstream ' + sha[:12], cwd=target)
         if os.environ.get('SYNC_DRY_RUN') == '1':
             print('DRY RUN PASS:', json.dumps(metadata))
+            if os.environ.get('SYNC_EXPORT_DIR'):
+                export = pathlib.Path(os.environ['SYNC_EXPORT_DIR'])
+                export.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(target, export, dirs_exist_ok=True)
         else:
             run('git', 'push', 'origin', 'HEAD:refs/heads/' + branch, cwd=target)
             run('gh', 'workflow', 'run', 'custom-manager.yml', '--repo', repo, '--ref', branch)
