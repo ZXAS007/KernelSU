@@ -1,0 +1,869 @@
+diff --git a/.github/scripts/prepare-static-libc.sh b/.github/scripts/prepare-static-libc.sh
+new file mode 100755
+index 00000000..27a07151
+--- /dev/null
++++ b/.github/scripts/prepare-static-libc.sh
+@@ -0,0 +1,11 @@
++#!/usr/bin/env bash
++# NDK r30 libc.a includes Rust's personality symbol. Prefer the application's
++# definition when statically linking a Rust binary, without changing the NDK.
++set -eu
++triple=$1
++llvm="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64"
++libc_dir="$PWD/target/ndk-static-libc/$triple"
++mkdir -p "$libc_dir"
++cp "$llvm/sysroot/usr/lib/$triple/libc.a" "$libc_dir/libc.a"
++"$llvm/bin/llvm-objcopy" --weaken-symbol=rust_eh_personality "$libc_dir/libc.a"
++export RUSTFLAGS="${RUSTFLAGS:-} -L native=$libc_dir"
+diff --git a/.github/scripts/setup-rust-build.sh b/.github/scripts/setup-rust-build.sh
+index 4bb424c5..9573d8a3 100644
+--- a/.github/scripts/setup-rust-build.sh
++++ b/.github/scripts/setup-rust-build.sh
+@@ -11,4 +11,4 @@ export CC_$UTRIPLE="$CLANG_PATH"
+ export CXX_$UTRIPLE="${CLANG_PATH}++"
+ export AR_$UTRIPLE="$LLVM_BIN/llvm-ar"
+ export CARGO_TARGET_${UUTRIPLE}_LINKER="$CLANG_PATH"
+-export BINDGEN_EXTRA_CLANG_ARGS_$UTRIPLE="--sysroot=$LLVM_PATH/sysroot -I$LLVM_PATH/sysroot/usr/include/$TRIPLE"
++export BINDGEN_EXTRA_CLANG_ARGS_$UTRIPLE="--target=${TRIPLE}${ANDROID_SDK_LEVEL} --sysroot=$LLVM_PATH/sysroot -I$LLVM_PATH/sysroot/usr/include/$TRIPLE"
+diff --git a/.github/workflows/build-manager.yml b/.github/workflows/build-manager.yml
+index 7d9f66c9..11c33401 100644
+--- a/.github/workflows/build-manager.yml
++++ b/.github/workflows/build-manager.yml
+@@ -39,7 +39,7 @@ on:
+ 
+ jobs:
+   generate-key:
+-    runs-on: ubuntu-latest
++    runs-on: ubuntu-24.04
+     outputs:
+       expected_size: ${{ steps.extract.outputs.expected_size }}
+       expected_hash: ${{ steps.extract.outputs.expected_hash }}
+@@ -124,15 +124,15 @@ jobs:
+       matrix:
+         include:
+           - target: x86_64-pc-windows-gnu # windows pc
+-            os: ubuntu-latest
++            os: ubuntu-24.04
+           - target: x86_64-apple-darwin # Intel mac
+             os: macos-latest
+           - target: aarch64-apple-darwin # M chip mac
+             os: macos-latest
+           - target: aarch64-unknown-linux-musl # arm64 Linux
+-            os: ubuntu-latest
++            os: ubuntu-24.04
+           - target: x86_64-unknown-linux-musl # x86 Linux
+-            os: ubuntu-latest
++            os: ubuntu-24.04
+     uses: ./.github/workflows/ksud-extra.yml
+     with:
+       target: ${{ matrix.target }}
+@@ -143,7 +143,7 @@ jobs:
+   build-manager:
+     needs: [generate-key]
+     if: always() && needs.generate-key.result == 'success'
+-    runs-on: ubuntu-latest
++    runs-on: ubuntu-24.04
+     defaults:
+       run:
+         working-directory: ./manager
+@@ -216,7 +216,7 @@ jobs:
+   repack-manager:
+     needs: [build-manager, build-ksud, generate-key]
+     if: always() && needs.build-manager.result == 'success' && needs.build-ksud.result == 'success' && needs.generate-key.result == 'success'
+-    runs-on: ubuntu-latest
++    runs-on: ubuntu-24.04
+ 
+     steps:
+       - name: Checkout
+diff --git a/.github/workflows/clang-format.yml b/.github/workflows/clang-format.yml
+index 8987ce8f..95b9a179 100644
+--- a/.github/workflows/clang-format.yml
++++ b/.github/workflows/clang-format.yml
+@@ -24,7 +24,7 @@ permissions:
+ 
+ jobs:
+   format:
+-    runs-on: ubuntu-latest
++    runs-on: ubuntu-24.04
+     steps:
+       - uses: actions/checkout@v7
+ 
+diff --git a/.github/workflows/clippy.yml b/.github/workflows/clippy.yml
+index 19cf8d26..4409f996 100644
+--- a/.github/workflows/clippy.yml
++++ b/.github/workflows/clippy.yml
+@@ -21,7 +21,7 @@ env:
+ 
+ jobs:
+   clippy:
+-    runs-on: ubuntu-latest
++    runs-on: ubuntu-24.04
+     steps:
+       - uses: actions/checkout@v7
+ 
+diff --git a/.github/workflows/custom-lkm.yml b/.github/workflows/custom-lkm.yml
+new file mode 100644
+index 00000000..8e772e85
+--- /dev/null
++++ b/.github/workflows/custom-lkm.yml
+@@ -0,0 +1,46 @@
++name: Build custom KernelSU LKM
++on:
++  workflow_dispatch:
++permissions:
++  contents: read
++jobs:
++  build:
++    runs-on: ubuntu-24.04
++    container:
++      image: ghcr.io/ylarod/ddk-min:android15-6.6-20260828
++      options: --privileged
++    steps:
++      - name: Checkout matching upstream source
++        uses: actions/checkout@v7
++        with:
++          repository: ZXAS007/KernelSU
++          ref: 6e3860443f8fea7c5fc226277e53888033796488
++          fetch-depth: 0
++      - name: Build Android 15 / 6.6 arm64 LKM
++        env:
++          KSU_PACKAGE_NAME: op.ultra.plus
++          KSU_EXPECTED_SIZE: '0x313'
++          KSU_EXPECTED_HASH: c3f59b375ae3953bc2bc94ed5c19115dfac42e7f5440585590d555059d96c62f
++        shell: bash
++        run: |
++          git config --global --add safe.directory "$GITHUB_WORKSPACE"
++          git rev-list --count HEAD
++          cd kernel
++          CONFIG_KSU=m CC=clang make \
++            KSU_PACKAGE_NAME="$KSU_PACKAGE_NAME" \
++            KSU_EXPECTED_SIZE="$KSU_EXPECTED_SIZE" \
++            KSU_EXPECTED_HASH="$KSU_EXPECTED_HASH"
++          mkdir -p "$GITHUB_WORKSPACE/out"
++          cp kernelsu.ko "$GITHUB_WORKSPACE/out/android15-6.6_kernelsu.ko"
++          llvm-strip -d "$GITHUB_WORKSPACE/out/android15-6.6_kernelsu.ko"
++          cd "$GITHUB_WORKSPACE/out"
++          sha256sum android15-6.6_kernelsu.ko > SHA256SUMS
++          git -C "$GITHUB_WORKSPACE" rev-parse HEAD > source-commit.txt
++          git -C "$GITHUB_WORKSPACE" rev-list --count HEAD > source-count.txt
++          printf '%s\n' 'package=op.ultra.plus' 'certificate_sha256=c3f59b375ae3953bc2bc94ed5c19115dfac42e7f5440585590d555059d96c62f' 'certificate_size=0x313' > build-parameters.txt
++      - name: Upload module
++        uses: actions/upload-artifact@v7
++        with:
++          name: KernelSU-op-ultra-plus-android15-6.6
++          path: out/
++          if-no-files-found: error
+diff --git a/.github/workflows/custom-manager.yml b/.github/workflows/custom-manager.yml
+new file mode 100644
+index 00000000..2007ed29
+--- /dev/null
++++ b/.github/workflows/custom-manager.yml
+@@ -0,0 +1,166 @@
++name: Custom Manager Cloud
++on:
++  workflow_dispatch:
++permissions:
++  contents: read
++jobs:
++  certificate:
++    runs-on: ubuntu-24.04
++    outputs:
++      size: ${{ steps.cert.outputs.size }}
++      hash: ${{ steps.cert.outputs.hash }}
++    steps:
++      - uses: actions/setup-java@v5
++        with:
++          distribution: temurin
++          java-version: '21'
++      - name: Export public certificate
++        id: cert
++        env:
++          KEYSTORE: ${{ secrets.KSU_CLOUD_KEYSTORE }}
++          PASSWORD: ${{ secrets.KSU_CLOUD_PASSWORD }}
++        run: |
++          umask 077
++          test -n "$KEYSTORE" && test -n "$PASSWORD"
++          printf '%s' "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/cloud.jks"
++          keytool -exportcert -alias cloud-manager -keystore "$RUNNER_TEMP/cloud.jks" -storepass:env PASSWORD -file certificate.der
++          printf 'size=0x%04x\n' "$(stat -c%s certificate.der)" >> "$GITHUB_OUTPUT"
++          printf 'hash=%s\n' "$(sha256sum certificate.der | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
++          rm "$RUNNER_TEMP/cloud.jks"
++      - uses: actions/upload-artifact@v7
++        with:
++          name: cloud-public-certificate
++          path: certificate.der
++  lkm:
++    needs: certificate
++    uses: ./.github/workflows/build-lkm.yml
++    with:
++      package_name: op.ultra.plus
++      expected_size: ${{ needs.certificate.outputs.size }}
++      expected_hash: ${{ needs.certificate.outputs.hash }}
++  ksuinit:
++    uses: ./.github/workflows/ksuinit.yml
++  ksud:
++    needs: [lkm, ksuinit]
++    strategy:
++      matrix:
++        target: [aarch64-linux-android, x86_64-linux-android, riscv64-linux-android]
++    uses: ./.github/workflows/ksud.yml
++    with:
++      target: ${{ matrix.target }}
++      pack_lkm: true
++      pack_ksuinit: true
++      package_name: op.ultra.plus
++  manager:
++    needs: [certificate, ksud]
++    runs-on: ubuntu-24.04
++    steps:
++      - uses: actions/checkout@v7
++        with:
++          fetch-depth: 0
++      - name: Fetch official version tags
++        run: |
++          git fetch https://github.com/tiann/KernelSU.git "refs/tags/v*:refs/tags/v*"
++          git describe --tags --match "v[0-9]*" --long --abbrev=8
++      - uses: actions/setup-java@v5
++        with:
++          distribution: temurin
++          java-version: '21'
++      - uses: gradle/actions/setup-gradle@v5
++      - uses: actions/download-artifact@v8
++        with:
++          pattern: ksud-*
++          path: payload
++      - name: Place freshly built payload
++        run: |
++          mkdir -p manager/app/src/main/jniLibs/{arm64-v8a,x86_64,riscv64}
++          cp payload/ksud-aarch64-linux-android/ksud manager/app/src/main/jniLibs/arm64-v8a/libksud.so
++          cp payload/ksud-x86_64-linux-android/ksud manager/app/src/main/jniLibs/x86_64/libksud.so
++          cp payload/ksud-riscv64-linux-android/ksud manager/app/src/main/jniLibs/riscv64/libksud.so
++      - name: Configure cloud signing
++        env:
++          KEYSTORE: ${{ secrets.KSU_CLOUD_KEYSTORE }}
++          PASSWORD: ${{ secrets.KSU_CLOUD_PASSWORD }}
++        run: |
++          umask 077
++          test -n "$KEYSTORE" && test -n "$PASSWORD"
++          printf '%s' "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/cloud.jks"
++          {
++            printf 'KEYSTORE_FILE=%s\n' "$RUNNER_TEMP/cloud.jks"
++            printf 'KEYSTORE_PASSWORD=%s\nKEY_PASSWORD=%s\n' "$PASSWORD" "$PASSWORD"
++            printf 'KEY_ALIAS=cloud-manager\n'
++          } >> manager/gradle.properties
++      - name: Build signed manager with matched LKM
++        working-directory: manager
++        run: |
++          chmod +x gradlew
++          ./gradlew clean assembleRelease -PKSU_PACKAGE_NAME=op.ultra.plus
++      - name: Sign final APK with cloud certificate
++        env:
++          PASSWORD: ${{ secrets.KSU_CLOUD_PASSWORD }}
++        run: |
++          TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n1)
++          APK=$(find manager/app/build/outputs/apk/release -name '*.apk' | head -n1)
++          "$TOOLS/zipalign" -f -P 16 4 "$APK" "$RUNNER_TEMP/aligned.apk"
++          "$TOOLS/apksigner" sign --v1-signing-enabled false --v2-signing-enabled true --v3-signing-enabled false --v4-signing-enabled false --ks "$RUNNER_TEMP/cloud.jks" --ks-key-alias cloud-manager --ks-pass env:PASSWORD --key-pass env:PASSWORD --out "$APK" "$RUNNER_TEMP/aligned.apk"
++      - name: Verify final APK and record provenance
++
++        env:
++          EXPECTED_HASH: ${{ needs.certificate.outputs.hash }}
++          EXPECTED_SIZE: ${{ needs.certificate.outputs.size }}
++        run: |
++          mkdir -p delivery
++          cp manager/app/build/outputs/apk/release/*.apk delivery/
++          APK=$(find delivery -name '*.apk' | head -n1)
++          TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n1)
++          "$TOOLS/apksigner" verify --verbose --print-certs "$APK" | tee delivery/signature.txt
++          grep -F "certificate SHA-256 digest: $EXPECTED_HASH" delivery/signature.txt
++          python3 - <<'PY'
++          import pathlib, re
++          signature = pathlib.Path('delivery/signature.txt').read_text()
++          schemes = dict(re.findall(r'Verified using (v[0-9.]+) scheme .*: (true|false)', signature))
++          assert schemes.get('v2') == 'true', schemes
++          assert all(value == 'false' for scheme, value in schemes.items() if scheme != 'v2'), schemes
++          PY
++          "$TOOLS/zipalign" -c -P 16 4 "$APK"
++          "$TOOLS/aapt" dump badging "$APK" > delivery/package.txt
++          grep -F "package: name='op.ultra.plus'" delivery/package.txt
++          VERSION=$(git describe --tags --match "v[0-9]*" --long --abbrev=8)
++          grep -F "versionName='$VERSION'" delivery/package.txt
++          unzip -t "$APK" | tail -n1
++          python3 - <<'PY'
++          import pathlib, zipfile, hashlib, json
++          apk = next(pathlib.Path('delivery').glob('*.apk'))
++          result = {}
++          with zipfile.ZipFile(apk) as z:
++              for abi, target in [('arm64-v8a','aarch64-linux-android'),('x86_64','x86_64-linux-android'),('riscv64','riscv64-linux-android')]:
++                  data = z.read(f'lib/{abi}/libksud.so')
++                  assert len(data) > 100000
++                  assert data == pathlib.Path(f'payload/ksud-{target}/ksud').read_bytes(), abi
++                  result[abi] = hashlib.sha256(data).hexdigest()
++          pathlib.Path('delivery/payload.json').write_text(json.dumps(result, indent=2))
++          PY
++          {
++            if [ -f sync-provenance.json ]; then
++              cat sync-provenance.json
++            else
++              echo 'Upstream run: 38137972875'
++              echo 'Source base: 1ba1ae693e1e92563dcb2a181eadd949330da7f1'
++            fi
++            printf 'Custom commit: '; git rev-parse HEAD
++            echo "Manager certificate / LKM expected hash: $EXPECTED_HASH"
++            echo "Certificate DER size / LKM expected size: $EXPECTED_SIZE"
++            echo 'Manager and ksud package: op.ultra.plus'
++            echo "Actions run: $GITHUB_RUN_ID"
++          } > delivery/provenance.txt
++          (cd delivery && sha256sum *.apk > SHA256SUMS)
++      - name: Remove runner signing files
++        if: always()
++        run: |
++          rm -f "$RUNNER_TEMP/cloud.jks"
++          git checkout -- manager/gradle.properties
++      - uses: actions/upload-artifact@v7
++        with:
++          name: KernelSU-op-ultra-plus-cloud-signed
++          path: delivery/
++          if-no-files-found: error
+\ No newline at end of file
+diff --git a/.github/workflows/ddk-lkm.yml b/.github/workflows/ddk-lkm.yml
+index 2e2e6773..7b3fbaea 100644
+--- a/.github/workflows/ddk-lkm.yml
++++ b/.github/workflows/ddk-lkm.yml
+@@ -31,7 +31,7 @@ on:
+ jobs:
+   build-kernelsu-ko:
+     name: Build kernelsu.ko for ${{ inputs.kmi }}
+-    runs-on: ubuntu-latest
++    runs-on: ubuntu-24.04
+     container:
+       image: ghcr.io/ylarod/ddk-min:${{ inputs.kmi }}-${{ inputs.ddk_release }}
+       options: --privileged
+diff --git a/.github/workflows/deploy-website.yml b/.github/workflows/deploy-website.yml
+index e149933a..05411e6b 100644
+--- a/.github/workflows/deploy-website.yml
++++ b/.github/workflows/deploy-website.yml
+@@ -25,7 +25,7 @@ concurrency:
+ jobs:
+   # Build job
+   build:
+-    runs-on: ubuntu-latest
++    runs-on: ubuntu-24.04
+     defaults:
+       run:
+         working-directory: ./website
+@@ -59,7 +59,7 @@ jobs:
+       name: github-pages
+       url: ${{ steps.deployment.outputs.page_url }}
+     needs: build
+-    runs-on: ubuntu-latest
++    runs-on: ubuntu-24.04
+     name: Deploy
+     steps:
+       - name: Deploy to GitHub Pages
+diff --git a/.github/workflows/ksud-extra.yml b/.github/workflows/ksud-extra.yml
+index 83bfcd13..e01ccdb1 100644
+--- a/.github/workflows/ksud-extra.yml
++++ b/.github/workflows/ksud-extra.yml
+@@ -8,7 +8,7 @@ on:
+       os:
+         required: false
+         type: string
+-        default: ubuntu-latest
++        default: ubuntu-24.04
+       pack_lkm:
+         required: false
+         type: boolean
+diff --git a/.github/workflows/ksud.yml b/.github/workflows/ksud.yml
+index 2069a932..1ee8ce15 100644
+--- a/.github/workflows/ksud.yml
++++ b/.github/workflows/ksud.yml
+@@ -13,9 +13,15 @@ on:
+         required: false
+         type: boolean
+         default: false
++      package_name:
++        description: 'Package name of the matching manager'
++        required: false
++        type: string
++        default: ''
++
+ jobs:
+   build:
+-    runs-on: ubuntu-latest
++    runs-on: ubuntu-24.04
+     steps:
+     - uses: actions/checkout@v7
+       with:
+@@ -54,17 +60,21 @@ jobs:
+     - uses: nttld/setup-ndk@v1
+       id: setup-ndk
+       with:
+-        ndk-version: r29
++        ndk-version: r30
+ 
+     - name: Build ksud
+       env:
+         ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
++        KSU_PACKAGE_NAME: ${{ inputs.package_name }}
+       run: |
++        if [ -z "$KSU_PACKAGE_NAME" ]; then
++          unset KSU_PACKAGE_NAME
++        fi
+         if [ "${{ github.event_name }}" = "pull_request" ]; then
+           export KSU_PACKAGE_NAME="me.weishu.kernelsu.pr"
+         fi
+         if [ "${{ inputs.target }}" = riscv64-linux-android ]; then
+-          source .github/scripts/setup-rust-build.sh riscv64-linux-android 35
++          source .github/scripts/setup-rust-build.sh riscv64-linux-android 37
+           cargo +nightly-2026-09-23 build --config .github/riscv64-cargo.toml -Z build-std=std,panic_abort --target "$TRIPLE" --release --manifest-path ./userspace/ksud/Cargo.toml
+         else
+           source .github/scripts/setup-rust-build.sh ${{ inputs.target }} 26
+diff --git a/.github/workflows/ksuinit.yml b/.github/workflows/ksuinit.yml
+index 09b76f28..625b3702 100644
+--- a/.github/workflows/ksuinit.yml
++++ b/.github/workflows/ksuinit.yml
+@@ -5,7 +5,7 @@ on:
+       os:
+         required: false
+         type: string
+-        default: ubuntu-latest
++        default: ubuntu-24.04
+ jobs:
+   build:
+     runs-on: ${{ inputs.os }}
+@@ -23,7 +23,7 @@ jobs:
+     - uses: nttld/setup-ndk@v1
+       id: setup-ndk
+       with:
+-        ndk-version: r29
++        ndk-version: r30
+ 
+     - uses: Swatinem/rust-cache@v2
+       with:
+@@ -38,6 +38,7 @@ jobs:
+         BUILTINS="$($CLANG_PATH --print-resource-dir)/lib/linux/libclang_rt.builtins-aarch64-android.a"
+         test -f "$BUILTINS"
+         export RUSTFLAGS="-C target-feature=+crt-static -C link-arg=-Wl,-z,max-page-size=16384 -C link-arg=-Wno-unused-command-line-argument -C link-arg=$BUILTINS"
++        source .github/scripts/prepare-static-libc.sh "$TRIPLE"
+         cargo build --package ksuinit --target=aarch64-linux-android --release
+ 
+     - name: Upload ksuinit artifact
+@@ -54,6 +55,7 @@ jobs:
+         BUILTINS="$($CLANG_PATH --print-resource-dir)/lib/linux/libclang_rt.builtins-x86_64-android.a"
+         test -f "$BUILTINS"
+         export RUSTFLAGS="-C target-feature=+crt-static -C link-arg=-Wl,-z,max-page-size=16384 -C link-arg=-Wno-unused-command-line-argument -C link-arg=$BUILTINS"
++        source .github/scripts/prepare-static-libc.sh "$TRIPLE"
+         cargo build --package ksuinit --target=x86_64-linux-android --release
+ 
+     - name: Upload x64 ksuinit artifact
+@@ -75,7 +77,7 @@ jobs:
+     - uses: nttld/setup-ndk@v1
+       id: setup-ndk
+       with:
+-        ndk-version: r29
++        ndk-version: r30
+ 
+     - uses: Swatinem/rust-cache@v2
+       with:
+@@ -86,9 +88,10 @@ jobs:
+       env:
+         ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+       run: |
+-        source .github/scripts/setup-rust-build.sh riscv64-linux-android 35
++        source .github/scripts/setup-rust-build.sh riscv64-linux-android 37
+         BUILTINS="$($CLANG_PATH --print-resource-dir)/lib/linux/libclang_rt.builtins-riscv64-android.a"
+         export RUSTFLAGS="-C target-feature=+crt-static -C link-arg=-Wl,-z,max-page-size=16384 -C link-arg=-Wno-unused-command-line-argument -C link-arg=$BUILTINS"
++        source .github/scripts/prepare-static-libc.sh "$TRIPLE"
+         cargo +nightly-2026-09-23 build --config .github/riscv64-cargo.toml -Z build-std=std,panic_abort --package ksuinit --target=riscv64-linux-android --release
+ 
+     - name: Upload RISC-V ksuinit artifact
+diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
+index 1b66fe82..7ccf4691 100644
+--- a/.github/workflows/release.yml
++++ b/.github/workflows/release.yml
+@@ -12,7 +12,7 @@ jobs:
+   release:
+     needs:
+       - build-manager
+-    runs-on: ubuntu-latest
++    runs-on: ubuntu-24.04
+     steps:
+       - name: Download artifacts
+         uses: actions/download-artifact@v8
+diff --git a/.github/workflows/rustfmt.yml b/.github/workflows/rustfmt.yml
+index c1be1ae9..4912bec7 100644
+--- a/.github/workflows/rustfmt.yml
++++ b/.github/workflows/rustfmt.yml
+@@ -21,7 +21,7 @@ permissions:
+ 
+ jobs:
+   format:
+-    runs-on: ubuntu-latest
++    runs-on: ubuntu-24.04
+     steps:
+       - uses: actions/checkout@v7
+ 
+diff --git a/.github/workflows/shellcheck.yml b/.github/workflows/shellcheck.yml
+index 2981cd01..ac1e3693 100644
+--- a/.github/workflows/shellcheck.yml
++++ b/.github/workflows/shellcheck.yml
+@@ -18,7 +18,7 @@ on:
+ 
+ jobs:
+   shellcheck:
+-    runs-on: ubuntu-latest
++    runs-on: ubuntu-24.04
+     steps:
+       - uses: actions/checkout@v7
+ 
+diff --git a/manager/app/build.gradle.kts b/manager/app/build.gradle.kts
+index e8349782..90e74ebe 100644
+--- a/manager/app/build.gradle.kts
++++ b/manager/app/build.gradle.kts
+@@ -6,7 +6,6 @@ plugins {
+     alias(libs.plugins.agp.app)
+     alias(libs.plugins.compose.compiler)
+     alias(libs.plugins.kotlin.serialization)
+-    alias(libs.plugins.lsplugin.apksign)
+     alias(libs.plugins.protobuf)
+     id("kotlin-parcelize")
+ }
+@@ -28,13 +27,6 @@ val defaultManagerName = if (isPrBuild) "KernelSU PR" else "KernelSU"
+ val managerPackageName = project.findProperty("KSU_PACKAGE_NAME")?.toString() ?: defaultManagerPackageName
+ val managerName = project.findProperty("KSU_NAME")?.toString() ?: defaultManagerName
+ 
+-apksign {
+-    storeFileProperty = "KEYSTORE_FILE"
+-    storePasswordProperty = "KEYSTORE_PASSWORD"
+-    keyAliasProperty = "KEY_ALIAS"
+-    keyPasswordProperty = "KEY_PASSWORD"
+-}
+-
+ protobuf {
+     protoc {
+         artifact = libs.protobuf.protoc.get().toString()
+@@ -63,6 +55,26 @@ val baseCppFlags = baseCFlags + "-fno-rtti"
+ android {
+     namespace = "me.weishu.kernelsu"
+ 
++    val cloudKeystore = providers.gradleProperty("KEYSTORE_FILE").orNull
++    val cloudSigning = cloudKeystore?.let {
++        signingConfigs.create("cloud") {
++            storeFile = file(it)
++            storePassword = providers.gradleProperty("KEYSTORE_PASSWORD").get()
++            keyAlias = providers.gradleProperty("KEY_ALIAS").get()
++            keyPassword = providers.gradleProperty("KEY_PASSWORD").get()
++            enableV1Signing = false
++            enableV2Signing = true
++            enableV3Signing = false
++            enableV4Signing = false
++        }
++    }
++    signingConfigs.getByName("debug") {
++        enableV1Signing = false
++        enableV2Signing = true
++        enableV3Signing = false
++        enableV4Signing = false
++    }
++
+     buildTypes {
+         debug {
+             externalNativeBuild {
+@@ -72,13 +84,13 @@ android {
+             }
+         }
+         release {
++            signingConfig = cloudSigning ?: signingConfigs.getByName("debug")
+             isMinifyEnabled = true
+             isShrinkResources = true
+             vcsInfo.include = false
+             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+             externalNativeBuild {
+                 cmake {
+-                    arguments += "-DDEBUG_SYMBOLS_PATH=${layout.buildDirectory.get().asFile.absolutePath}/symbols"
+                     arguments += "-DCMAKE_BUILD_TYPE=Release"
+ 
+                     val releaseFlags = listOf(
+@@ -115,6 +127,8 @@ android {
+         jniLibs {
+             useLegacyPackaging = true
+             excludes += "lib/*/libandroidx.graphics.path.so"
++            // ksud is a signed-build payload; preserve the exact downloaded binary.
++            keepDebugSymbols += "**/libksud.so"
+         }
+     }
+ 
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsMaterial.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsMaterial.kt
+index 87caf417..a37d21f0 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsMaterial.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsMaterial.kt
+@@ -213,6 +213,20 @@ fun SettingPagerMaterial(
+                                 onCheckedChange = actions.onSetKernelUmountEnabled
+                             )
+                         },
++                        {
++                            SegmentedSwitchItem(
++                                icon = Icons.Filled.Security,
++                                title = stringResource(R.string.settings_selinux_enforcing),
++                                summary = when (uiState.selinuxEnforcing) {
++                                    true -> stringResource(R.string.settings_selinux_enforcing_summary)
++                                    false -> stringResource(R.string.settings_selinux_permissive_summary)
++                                    null -> stringResource(R.string.settings_selinux_unavailable_summary)
++                                },
++                                enabled = uiState.selinuxEnforcing != null && !uiState.selinuxBusy,
++                                checked = uiState.selinuxEnforcing == true,
++                                onCheckedChange = actions.onSetSelinuxEnforcing
++                            )
++                        },
+                         {
+                             val selinuxHideSummary = when (uiState.selinuxHideStatus) {
+                                 "unsupported" -> stringResource(id = R.string.feature_status_unsupported_summary)
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsMiuix.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsMiuix.kt
+index e6e4cdc9..81106a4d 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsMiuix.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsMiuix.kt
+@@ -258,6 +258,17 @@ fun SettingPagerMiuix(
+                                 onCheckedChange = actions.onSetKernelUmountEnabled
+                             )
+ 
++                            SwitchPreference(
++                                title = stringResource(R.string.settings_selinux_enforcing),
++                                summary = when (uiState.selinuxEnforcing) {
++                                    true -> stringResource(R.string.settings_selinux_enforcing_summary)
++                                    false -> stringResource(R.string.settings_selinux_permissive_summary)
++                                    null -> stringResource(R.string.settings_selinux_unavailable_summary)
++                                },
++                                enabled = uiState.selinuxEnforcing != null && !uiState.selinuxBusy,
++                                checked = uiState.selinuxEnforcing == true,
++                                onCheckedChange = actions.onSetSelinuxEnforcing
++                            )
+                             val selinuxHideSummary = when (uiState.selinuxHideStatus) {
+                                 "unsupported" -> stringResource(id = R.string.feature_status_unsupported_summary)
+                                 "managed" -> stringResource(id = R.string.feature_status_managed_summary)
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsScreen.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsScreen.kt
+index 8d8dc81e..797a10f4 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsScreen.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsScreen.kt
+@@ -52,6 +52,7 @@ fun SettingPager(
+         onOpenProfileTemplate = { navigator.push(Route.AppProfileTemplate) },
+         onSetSuCompatMode = viewModel::setSuCompatMode,
+         onSetKernelUmountEnabled = viewModel::setKernelUmountEnabled,
++        onSetSelinuxEnforcing = viewModel::setSelinuxEnforcing,
+         onSetSelinuxHideEnabled = viewModel::setSelinuxHideEnabled,
+         onSetSulogEnabled = viewModel::setSulogEnabled,
+         onSetAdbRootEnabled = viewModel::setAdbRootEnabled,
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsUiState.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsUiState.kt
+index e028e87f..3ef88438 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsUiState.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/screen/settings/SettingsUiState.kt
+@@ -35,6 +35,8 @@ data class SettingsUiState(
+     val kernelUmountStatus: String = "",
+     val isKernelUmountEnabled: Boolean = false,
+ 
++    val selinuxEnforcing: Boolean? = null,
++    val selinuxBusy: Boolean = false,
+     // SELinux Hide
+     val selinuxHideStatus: String = "",
+     val isSelinuxHideEnabled: Boolean = false,
+@@ -69,6 +71,7 @@ data class SettingsScreenActions(
+     val onOpenProfileTemplate: () -> Unit,
+     val onSetSuCompatMode: (Int) -> Unit,
+     val onSetKernelUmountEnabled: (Boolean) -> Unit,
++    val onSetSelinuxEnforcing: (Boolean) -> Unit,
+     val onSetSelinuxHideEnabled: (Boolean) -> Unit,
+     val onSetSulogEnabled: (Boolean) -> Unit,
+     val onSetAdbRootEnabled: (Boolean) -> Unit,
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/util/SelinuxStateChanges.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/util/SelinuxStateChanges.kt
+new file mode 100644
+index 00000000..58716a6f
+--- /dev/null
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/util/SelinuxStateChanges.kt
+@@ -0,0 +1,14 @@
++package me.weishu.kernelsu.ui.util
++
++import kotlinx.coroutines.flow.MutableStateFlow
++import kotlinx.coroutines.flow.asStateFlow
++import kotlinx.coroutines.flow.update
++
++object SelinuxStateChanges {
++    private val revision = MutableStateFlow(0L)
++    val changes = revision.asStateFlow()
++
++    fun notifyChanged() {
++        revision.update { it + 1 }
++    }
++}
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/viewmodel/HomeViewModel.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/viewmodel/HomeViewModel.kt
+index a7e191dd..c92520cb 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/ui/viewmodel/HomeViewModel.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/viewmodel/HomeViewModel.kt
+@@ -20,6 +20,7 @@ import me.weishu.kernelsu.ksuApp
+ import me.weishu.kernelsu.ui.screen.home.HomeUiState
+ import me.weishu.kernelsu.ui.screen.home.SystemInfo
+ import me.weishu.kernelsu.ui.screen.home.getManagerVersion
++import me.weishu.kernelsu.ui.util.SelinuxStateChanges
+ import me.weishu.kernelsu.ui.util.checkNewVersion
+ import me.weishu.kernelsu.ui.util.getSELinuxStatusRaw
+ import me.weishu.kernelsu.ui.util.module.LatestVersionInfo
+@@ -33,6 +34,15 @@ class HomeViewModel(
+     private val _uiState = MutableStateFlow(buildState())
+     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
+ 
++    init {
++        viewModelScope.launch {
++            SelinuxStateChanges.changes.collect {
++                val status = withContext(Dispatchers.IO) { getSELinuxStatusRaw() }
++                _uiState.update { it.copy(systemInfo = it.systemInfo.copy(selinuxStatus = status)) }
++            }
++        }
++    }
++
+     fun refresh() {
+         viewModelScope.launch {
+             val baseState = withContext(Dispatchers.IO) { buildState() }
+diff --git a/manager/app/src/main/java/me/weishu/kernelsu/ui/viewmodel/SettingsViewModel.kt b/manager/app/src/main/java/me/weishu/kernelsu/ui/viewmodel/SettingsViewModel.kt
+index 0f067c8e..37d9a150 100644
+--- a/manager/app/src/main/java/me/weishu/kernelsu/ui/viewmodel/SettingsViewModel.kt
++++ b/manager/app/src/main/java/me/weishu/kernelsu/ui/viewmodel/SettingsViewModel.kt
+@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.asStateFlow
+ import kotlinx.coroutines.flow.update
+ import kotlinx.coroutines.launch
+ import kotlinx.coroutines.withContext
++import me.weishu.kernelsu.ui.util.SelinuxStateChanges
++import me.weishu.kernelsu.ui.util.getRootShell
+ import me.weishu.kernelsu.Natives
+ import me.weishu.kernelsu.R
+ import me.weishu.kernelsu.data.repository.SettingsRepository
+@@ -32,6 +34,7 @@ class SettingsViewModel(
+ 
+     fun refresh() {
+         viewModelScope.launch {
++            val selinuxEnforcing = withContext(Dispatchers.IO) { readSelinuxEnforcing() }
+             val checkUpdate = repo.checkUpdate
+             val checkModuleUpdate = repo.checkModuleUpdate
+             val themeMode = repo.themeMode
+@@ -88,6 +91,7 @@ class SettingsViewModel(
+ 
+             _uiState.update {
+                 it.copy(
++                    selinuxEnforcing = if (it.selinuxBusy) it.selinuxEnforcing else selinuxEnforcing,
+                     uiMode = uiMode,
+                     checkUpdate = checkUpdate,
+                     checkModuleUpdate = checkModuleUpdate,
+@@ -127,6 +131,39 @@ class SettingsViewModel(
+         }
+     }
+ 
++    private fun readSelinuxEnforcing(): Boolean? = runCatching {
++        val result = getRootShell().newJob()
++            .add("/system/bin/getenforce").to(ArrayList<String>(), null).exec()
++        if (!result.isSuccess) return@runCatching null
++        when (result.out.firstOrNull()?.trim()) {
++            "Enforcing" -> true
++            "Permissive" -> false
++            else -> null
++        }
++    }.getOrNull()
++
++    fun setSelinuxEnforcing(enabled: Boolean) {
++        if (_uiState.value.selinuxBusy || _uiState.value.selinuxEnforcing == null) return
++        _uiState.update { it.copy(selinuxBusy = true) }
++        viewModelScope.launch {
++            val (success, actual) = withContext(Dispatchers.IO) {
++                val success = runCatching {
++                    getRootShell().newJob()
++                        .add("/system/bin/setenforce ${if (enabled) 1 else 0}")
++                        .exec().isSuccess
++                }.getOrDefault(false)
++                success to readSelinuxEnforcing()
++            }
++            _uiState.update { it.copy(selinuxEnforcing = actual, selinuxBusy = false) }
++            if (success && actual == enabled) {
++                SelinuxStateChanges.notifyChanged()
++            }
++            if (!success || actual != enabled) {
++                Toast.makeText(ksuApp, R.string.settings_selinux_toggle_failed, Toast.LENGTH_LONG).show()
++            }
++        }
++    }
++
+     fun setCheckUpdate(enabled: Boolean) {
+         repo.checkUpdate = enabled
+         _uiState.update { it.copy(checkUpdate = enabled) }
+diff --git a/manager/app/src/main/res/values-zh-rCN/strings.xml b/manager/app/src/main/res/values-zh-rCN/strings.xml
+index c784c776..ae1c63c1 100644
+--- a/manager/app/src/main/res/values-zh-rCN/strings.xml
++++ b/manager/app/src/main/res/values-zh-rCN/strings.xml
+@@ -303,4 +303,9 @@
+     <string name="nav_rail_collapse">收起导航栏</string>
+     <string name="settings_navigation_badge">导航栏角标</string>
+     <string name="settings_navigation_badge_summary">在导航栏显示已授权应用和已启用模块数量</string>
++    <string name="settings_selinux_enforcing">SELinux 强制模式</string>
++    <string name="settings_selinux_enforcing_summary">Enforcing（强制）· 切换仅本次运行生效</string>
++    <string name="settings_selinux_permissive_summary">Permissive（宽容）· 限制已放宽，重启后恢复系统配置</string>
++    <string name="settings_selinux_unavailable_summary">不可用 · SELinux 已禁用或无法读取状态</string>
++    <string name="settings_selinux_toggle_failed">SELinux 模式切换失败，请检查 Root 权限与内核支持</string>
+ </resources>
+diff --git a/manager/app/src/main/res/values/strings.xml b/manager/app/src/main/res/values/strings.xml
+index 7d9c90c0..15ef352e 100644
+--- a/manager/app/src/main/res/values/strings.xml
++++ b/manager/app/src/main/res/values/strings.xml
+@@ -309,4 +309,9 @@
+     <string name="nav_rail_collapse">Collapse navigation rail</string>
+     <string name="settings_navigation_badge">Navigation badge</string>
+     <string name="settings_navigation_badge_summary">Show granted app and enabled module counts on the navigation bar</string>
++    <string name="settings_selinux_enforcing">SELinux enforcing</string>
++    <string name="settings_selinux_enforcing_summary">Enforcing · changes last until reboot</string>
++    <string name="settings_selinux_permissive_summary">Permissive · restrictions are relaxed until reboot</string>
++    <string name="settings_selinux_unavailable_summary">Unavailable · SELinux disabled or status cannot be read</string>
++    <string name="settings_selinux_toggle_failed">Failed to switch SELinux mode; check Root access and kernel support</string>
+ </resources>
+diff --git a/manager/build.gradle.kts b/manager/build.gradle.kts
+index 0e1db37f..69b54599 100644
+--- a/manager/build.gradle.kts
++++ b/manager/build.gradle.kts
+@@ -16,13 +16,15 @@ extra["managerVersionCode"] = getVersionCode()
+ extra["managerVersionName"] = getVersionName()
+ 
+ fun getGitCommitCount(): Int {
+-    val process = Runtime.getRuntime().exec(arrayOf("git", "rev-list", "--count", "HEAD"))
+-    return process.inputStream.bufferedReader().use { it.readText().trim().toInt() }
++    return providers.exec {
++        commandLine("git", "-C", rootDir.parentFile.absolutePath, "rev-list", "--count", "HEAD")
++    }.standardOutput.asText.get().trim().toInt()
+ }
+ 
+ fun getGitDescribe(): String {
+-    val process = Runtime.getRuntime().exec(arrayOf("git", "describe", "--tags", "--always"))
+-    return process.inputStream.bufferedReader().use { it.readText().trim() }
++    return providers.exec {
++        commandLine("git", "-C", rootDir.parentFile.absolutePath, "describe", "--tags", "--match", "v[0-9]*", "--long", "--abbrev=8")
++    }.standardOutput.asText.get().trim()
+ }
+ 
+ fun getVersionCode(): Int {
+diff --git a/manager/gradle.properties b/manager/gradle.properties
+index db2ab30b..9cd24805 100644
+--- a/manager/gradle.properties
++++ b/manager/gradle.properties
+@@ -7,3 +7,6 @@ org.gradle.tooling.parallel=true
+ org.gradle.vfs.watch=true
+ android.r8.maxWorkers=4
+ android.native.buildOutput=verbose
++
++# AGP-supported suppression for the intentional R8 worker limit.
++android.sync.suppressAgpWarnings=UNSUPPORTED_PROJECT_OPTION_USE
+diff --git a/manager/gradle/libs.versions.toml b/manager/gradle/libs.versions.toml
+index d17d87f6..4fc08510 100644
+--- a/manager/gradle/libs.versions.toml
++++ b/manager/gradle/libs.versions.toml
+@@ -12,7 +12,7 @@ webkit = "1.17.0"
+ parcelablelist = "2.0.1"
+ material3 = "1.5.0-alpha28"
+ materialKolor = "5.0.1"
+-ndk = "29.0.14206865"
++ndk = "30.0.16248370"
+ libsu = "6.0.0"
+ apksign = "1.4"
+ miuix = "0.9.4"

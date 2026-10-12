@@ -339,4 +339,9 @@
     <string name="nav_rail_collapse">Collapse navigation rail</string>
     <string name="settings_navigation_badge">Navigation badge</string>
     <string name="settings_navigation_badge_summary">Show granted app and enabled module counts on the navigation bar</string>
+    <string name="settings_selinux_enforcing">SELinux enforcing</string>
+    <string name="settings_selinux_enforcing_summary">Enforcing · changes last until reboot</string>
+    <string name="settings_selinux_permissive_summary">Permissive · restrictions are relaxed until reboot</string>
+    <string name="settings_selinux_unavailable_summary">Unavailable · SELinux disabled or status cannot be read</string>
+    <string name="settings_selinux_toggle_failed">Failed to switch SELinux mode; check Root access and kernel support</string>
 </resources>
