@@ -1,0 +1,46 @@
+name: Build custom KernelSU LKM
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/ylarod/ddk-min:android15-6.6-20260828
+      options: --privileged
+    steps:
+      - name: Checkout matching upstream source
+        uses: actions/checkout@v7
+        with:
+          repository: ZXAS007/KernelSU
+          ref: 6e3860443f8fea7c5fc226277e53888033796488
+          fetch-depth: 0
+      - name: Build Android 15 / 6.6 arm64 LKM
+        env:
+          KSU_PACKAGE_NAME: op.ultra.plus
+          KSU_EXPECTED_SIZE: '0x313'
+          KSU_EXPECTED_HASH: c3f59b375ae3953bc2bc94ed5c19115dfac42e7f5440585590d555059d96c62f
+        shell: bash
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git rev-list --count HEAD
+          cd kernel
+          CONFIG_KSU=m CC=clang make \
+            KSU_PACKAGE_NAME="$KSU_PACKAGE_NAME" \
+            KSU_EXPECTED_SIZE="$KSU_EXPECTED_SIZE" \
+            KSU_EXPECTED_HASH="$KSU_EXPECTED_HASH"
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          cp kernelsu.ko "$GITHUB_WORKSPACE/out/android15-6.6_kernelsu.ko"
+          llvm-strip -d "$GITHUB_WORKSPACE/out/android15-6.6_kernelsu.ko"
+          cd "$GITHUB_WORKSPACE/out"
+          sha256sum android15-6.6_kernelsu.ko > SHA256SUMS
+          git -C "$GITHUB_WORKSPACE" rev-parse HEAD > source-commit.txt
+          git -C "$GITHUB_WORKSPACE" rev-list --count HEAD > source-count.txt
+          printf '%s\n' 'package=op.ultra.plus' 'certificate_sha256=c3f59b375ae3953bc2bc94ed5c19115dfac42e7f5440585590d555059d96c62f' 'certificate_size=0x313' > build-parameters.txt
+      - name: Upload module
+        uses: actions/upload-artifact@v7
+        with:
+          name: KernelSU-op-ultra-plus-android15-6.6
+          path: out/
+          if-no-files-found: error

@@ -52,6 +52,7 @@ fun SettingPager(
         onOpenProfileTemplate = { navigator.push(Route.AppProfileTemplate) },
         onSetSuCompatMode = viewModel::setSuCompatMode,
         onSetKernelUmountEnabled = viewModel::setKernelUmountEnabled,
+        onSetSelinuxEnforcing = viewModel::setSelinuxEnforcing,
         onSetSelinuxHideEnabled = viewModel::setSelinuxHideEnabled,
         onSetSulogEnabled = viewModel::setSulogEnabled,
         onSetAdbRootEnabled = viewModel::setAdbRootEnabled,
