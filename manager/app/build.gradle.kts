@@ -210,6 +210,11 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.tooling.preview)
+    // Microsoft Fluent UI for Android official Compose tokenized controls.
+    implementation("com.microsoft.fluentui:fluentui_core:0.3.11")
+    implementation("com.microsoft.fluentui:fluentui_controls:0.3.3")
+    implementation("com.microsoft.fluentui:fluentui_listitem:0.3.7")
+    implementation("com.microsoft.fluentui:fluentui_tablayout:0.3.5")
 
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)

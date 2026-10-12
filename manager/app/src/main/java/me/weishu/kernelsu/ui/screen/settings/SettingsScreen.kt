@@ -65,6 +65,7 @@ fun SettingPager(
 
     when (LocalUiMode.current) {
         UiMode.Miuix -> SettingPagerMiuix(uiState, actions, bottomInnerPadding)
-        UiMode.Material, UiMode.Fluent -> SettingPagerMaterial(uiState, actions, bottomInnerPadding)
+        UiMode.Material -> SettingPagerMaterial(uiState, actions, bottomInnerPadding)
+        UiMode.Fluent -> SettingPagerFluent(uiState, actions, bottomInnerPadding)
     }
 }

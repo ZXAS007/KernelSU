@@ -1,6 +1,8 @@
 package me.weishu.kernelsu.ui.theme
 
 import android.app.Activity
+import com.microsoft.fluentui.theme.FluentTheme
+import com.microsoft.fluentui.theme.ThemeMode
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialExpressiveTheme
@@ -80,6 +82,6 @@ fun FluentKernelSUTheme(appSettings: AppSettings, content: @Composable () -> Uni
         shapes = FluentShapes,
     ) {
         MonetColorsProvider.UpdateCss(scheme)
-        content()
+        FluentTheme(themeMode = if (dark) ThemeMode.Dark else ThemeMode.Light) { content() }
     }
 }
