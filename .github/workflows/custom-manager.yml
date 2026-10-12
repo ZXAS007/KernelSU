@@ -58,6 +58,10 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      - name: Fetch official version tags
+        run: |
+          git fetch https://github.com/tiann/KernelSU.git "refs/tags/v*:refs/tags/v*"
+          git describe --tags --match "v[0-9]*" --long --abbrev=8
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -121,6 +125,8 @@ jobs:
           "$TOOLS/zipalign" -c -P 16 4 "$APK"
           "$TOOLS/aapt" dump badging "$APK" > delivery/package.txt
           grep -F "package: name='op.ultra.plus'" delivery/package.txt
+          VERSION=$(git describe --tags --match "v[0-9]*" --long --abbrev=8)
+          grep -F "versionName='$VERSION'" delivery/package.txt
           unzip -t "$APK" | tail -n1
           python3 - <<'PY'
           import pathlib, zipfile, hashlib, json

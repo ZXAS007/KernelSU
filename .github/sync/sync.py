@@ -28,7 +28,7 @@ if os.environ.get('SYNC_DRY_RUN') != '1' and run('git', 'ls-remote', '--heads', 
         run('gh', 'workflow', 'run', 'custom-manager.yml', '--repo', repo, '--ref', branch)
         print('Retry dispatched:', branch)
     raise SystemExit(0)
-run('git', 'fetch', '--no-tags', 'https://github.com/tiann/KernelSU.git', sha)
+run('git', 'fetch', '--tags', 'https://github.com/tiann/KernelSU.git', sha)
 with tempfile.TemporaryDirectory(prefix='ksu-sync-', dir=ROOT.parent) as tmp:
     target = pathlib.Path(tmp) / 'source'
     run('git', 'worktree', 'add', '--detach', str(target), sha)

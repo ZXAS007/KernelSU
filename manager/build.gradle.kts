@@ -23,7 +23,7 @@ fun getGitCommitCount(): Int {
 
 fun getGitDescribe(): String {
     return providers.exec {
-        commandLine("git", "-C", rootDir.parentFile.absolutePath, "describe", "--tags", "--always")
+        commandLine("git", "-C", rootDir.parentFile.absolutePath, "describe", "--tags", "--match", "v[0-9]*", "--long", "--abbrev=8")
     }.standardOutput.asText.get().trim()
 }
 
