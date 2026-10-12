@@ -117,6 +117,8 @@ fun KernelSUTheme(
             appSettings = appSettings,
             content = content
         )
+
+        UiMode.Fluent -> FluentKernelSUTheme(appSettings, content)
     }
 }
 

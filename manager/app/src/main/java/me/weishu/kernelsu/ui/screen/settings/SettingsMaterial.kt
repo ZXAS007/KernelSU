@@ -127,8 +127,8 @@ fun SettingPagerMaterial(
                             icon = Icons.Filled.DisplaySettings,
                             title = stringResource(id = R.string.settings_ui_mode),
                             summary = stringResource(id = R.string.settings_ui_mode_summary),
-                            items = UiMode.entries.map { it.name },
-                            selectedIndex = if (uiState.uiMode == UiMode.Material.value) 1 else 0,
+                            items = UiMode.entries.map { if (it == UiMode.Fluent) "Fluent 2" else it.name },
+                            selectedIndex = UiMode.fromValue(uiState.uiMode).ordinal,
                             onItemSelected = actions.onSetUiModeIndex
                         )
                     }

@@ -4,11 +4,13 @@ import androidx.compose.runtime.staticCompositionLocalOf
 
 enum class UiMode(val value: String) {
     Miuix("miuix"),
-    Material("material");
+    Material("material"),
+    Fluent("fluent");
 
     companion object {
         fun fromValue(value: String): UiMode = when (value) {
             Material.value -> Material
+            Fluent.value -> Fluent
             else -> Miuix
         }
 

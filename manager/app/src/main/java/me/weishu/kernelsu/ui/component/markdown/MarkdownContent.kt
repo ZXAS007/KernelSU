@@ -41,7 +41,7 @@ fun MarkdownContent(
         label = "MarkdownContentPlaceholderAlpha",
     )
     val containerColor = when (uiMode) {
-        UiMode.Material -> MaterialTheme.colorScheme.surfaceContainerHigh
+        UiMode.Material, UiMode.Fluent -> MaterialTheme.colorScheme.surfaceContainerHigh
         UiMode.Miuix -> null
     }
     Box(
@@ -70,7 +70,7 @@ fun MarkdownContent(
                 contentAlignment = Alignment.Center,
             ) {
                 when (LocalUiMode.current) {
-                    UiMode.Material -> LoadingIndicator()
+                    UiMode.Material, UiMode.Fluent -> LoadingIndicator()
                     UiMode.Miuix -> InfiniteProgressIndicator()
                 }
             }

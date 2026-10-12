@@ -243,7 +243,7 @@ class MainActivity : ComponentActivity() {
                     }
 
                     when (uiMode) {
-                        UiMode.Material -> androidx.compose.material3.Scaffold(
+                        UiMode.Material, UiMode.Fluent -> androidx.compose.material3.Scaffold(
                             containerColor = MaterialTheme.colorScheme.surfaceContainer
                         ) { navDisplay() }
 
@@ -344,7 +344,7 @@ fun MainScreen(
     }
     val uiMode = LocalUiMode.current
     val surfaceColor = when (uiMode) {
-        UiMode.Material -> MaterialTheme.colorScheme.surface // Blur is not used in Material, this is just a placeholder
+        UiMode.Material, UiMode.Fluent -> MaterialTheme.colorScheme.surface // Blur is not used in Material, this is just a placeholder
         UiMode.Miuix -> MiuixTheme.colorScheme.surface
     }
     val blurBackdrop = rememberBlurBackdrop(enableBlur)
@@ -414,7 +414,7 @@ fun MainScreen(
             val navBarBottomPadding = WindowInsets.systemBars.asPaddingValues().calculateBottomPadding()
 
             when (uiMode) {
-                UiMode.Material -> androidx.compose.material3.Scaffold(
+                UiMode.Material, UiMode.Fluent -> androidx.compose.material3.Scaffold(
                     containerColor = MaterialTheme.colorScheme.surfaceContainer
                 ) {
                     Row {
@@ -457,7 +457,7 @@ fun MainScreen(
             }
 
             when (uiMode) {
-                UiMode.Material -> androidx.compose.material3.Scaffold(
+                UiMode.Material, UiMode.Fluent -> androidx.compose.material3.Scaffold(
                     bottomBar = bottomBar,
                     containerColor = MaterialTheme.colorScheme.surfaceContainer
                 ) { innerPadding ->

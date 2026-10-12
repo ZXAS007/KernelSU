@@ -15,6 +15,6 @@ fun StatusTag(
 ) {
     when (LocalUiMode.current) {
         UiMode.Miuix -> StatusTagMiuix(label, modifier, backgroundColor, contentColor)
-        UiMode.Material -> StatusTagMaterial(label, modifier, backgroundColor, contentColor)
+        UiMode.Material, UiMode.Fluent -> StatusTagMaterial(label, modifier, backgroundColor, contentColor)
     }
 }

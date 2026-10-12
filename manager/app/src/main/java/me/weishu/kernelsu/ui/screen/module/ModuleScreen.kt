@@ -183,7 +183,7 @@ fun ModulePager(
             bottomInnerPadding = bottomInnerPadding,
         )
 
-        UiMode.Material -> ModulePagerMaterial(
+        UiMode.Material, UiMode.Fluent -> ModulePagerMaterial(
             uiState = rawUiState,
             confirmDialogState = rawUiState.confirmDialogState,
             moduleEvent = viewModel.moduleEvent,
