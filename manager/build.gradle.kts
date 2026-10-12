@@ -33,5 +33,5 @@ fun getVersionCode(): Int {
 }
 
 fun getVersionName(): String {
-    return getGitDescribe()
+    return providers.gradleProperty("KSU_VERSION_NAME").orNull ?: getGitDescribe()
 }

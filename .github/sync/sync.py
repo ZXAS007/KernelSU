@@ -17,7 +17,8 @@ if not response['workflow_runs']:
     raise SystemExit('No successful upstream main push build found')
 source = response['workflow_runs'][0]
 sha = source['head_sha']
-branch = 'sync/upstream-' + sha
+customization_sha = run('git', 'rev-parse', 'HEAD')
+branch = 'sync/upstream-' + sha + '-custom-' + customization_sha[:12]
 if os.environ.get('SYNC_DRY_RUN') != '1' and run('git', 'ls-remote', '--heads', 'origin', 'refs/heads/' + branch):
     builds = json.loads(run('gh', 'api', f'repos/{repo}/actions/workflows/custom-manager.yml/runs?branch={branch}&event=workflow_dispatch&per_page=10'))['workflow_runs']
     if any(build['status'] != 'completed' or build['conclusion'] == 'success' for build in builds):
@@ -40,10 +41,12 @@ with tempfile.TemporaryDirectory(prefix='ksu-sync-', dir=ROOT.parent) as tmp:
         run('git', 'diff', '--cached', '--check', cwd=target)
         import shutil
         shutil.copytree(ROOT / '.github/sync', target / '.github/sync', dirs_exist_ok=True, ignore=shutil.ignore_patterns('__pycache__'))
+        shutil.copytree(ROOT / '.github/signing', target / '.github/signing', dirs_exist_ok=True)
         shutil.copyfile(ROOT / '.github/workflows/sync-upstream.yml', target / '.github/workflows/sync-upstream.yml')
         workflow = target / '.github/workflows/custom-manager.yml'
         workflow.write_bytes(run('git', 'show', 'HEAD:.github/workflows/custom-manager.yml').encode() + b'\n')
-        metadata = dict(upstream_repo='tiann/KernelSU', upstream_sha=sha, upstream_run=source['id'], upstream_url=source['html_url'], customization_sha=run('git', 'rev-parse', 'HEAD'))
+        version_name = run('git', 'describe', '--tags', '--match', 'v[0-9]*', '--long', '--abbrev=8', cwd=target)
+        metadata = dict(version_name=version_name, upstream_repo='tiann/KernelSU', upstream_sha=sha, upstream_run=source['id'], upstream_url=source['html_url'], customization_sha=customization_sha)
         (target / 'sync-provenance.json').write_text(json.dumps(metadata, indent=2) + '\n')
         run('git', 'config', 'user.name', 'KernelSU sync bot', cwd=target)
         run('git', 'config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com', cwd=target)

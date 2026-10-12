@@ -93,11 +93,21 @@ jobs:
             printf 'KEYSTORE_PASSWORD=%s\nKEY_PASSWORD=%s\n' "$PASSWORD" "$PASSWORD"
             printf 'KEY_ALIAS=cloud-manager\n'
           } >> manager/gradle.properties
+      - name: Resolve official version name
+        run: |
+          if [ -f sync-provenance.json ]; then
+            SOURCE=$(jq -er .upstream_sha sync-provenance.json)
+          else
+            SOURCE=HEAD
+          fi
+          VERSION=$(git describe --tags --match "v[0-9]*" --long --abbrev=8 "$SOURCE")
+          printf '%s\n' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+-[0-9]+-g[0-9a-f]{8}$'
+          echo "KSU_VERSION_NAME=$VERSION" >> "$GITHUB_ENV"
       - name: Build signed manager with matched LKM
         working-directory: manager
         run: |
           chmod +x gradlew
-          ./gradlew clean assembleRelease -PKSU_PACKAGE_NAME=op.ultra.plus --warning-mode=fail
+          ./gradlew clean assembleRelease -PKSU_PACKAGE_NAME=op.ultra.plus -PKSU_VERSION_NAME="$KSU_VERSION_NAME" --warning-mode=fail
       - name: Sign final APK with cloud certificate
         env:
           PASSWORD: ${{ secrets.KSU_CLOUD_PASSWORD }}
@@ -128,7 +138,7 @@ jobs:
           "$TOOLS/zipalign" -c -P 16 4 "$APK"
           "$TOOLS/aapt" dump badging "$APK" > delivery/package.txt
           grep -F "package: name='op.ultra.plus'" delivery/package.txt
-          VERSION=$(git describe --tags --match "v[0-9]*" --long --abbrev=8)
+          VERSION="$KSU_VERSION_NAME"
           grep -F "versionName='$VERSION'" delivery/package.txt
           grep -E "versionName='v[0-9]+\.[0-9]+\.[0-9]+-[0-9]+-g[0-9a-f]{8}'" delivery/package.txt
           unzip -t "$APK" | tail -n1

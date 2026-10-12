@@ -155,10 +155,10 @@ index 00000000..8e772e85
 +          if-no-files-found: error
 diff --git a/.github/workflows/custom-manager.yml b/.github/workflows/custom-manager.yml
 new file mode 100644
-index 00000000..2007ed29
+index 00000000..d487968b
 --- /dev/null
 +++ b/.github/workflows/custom-manager.yml
-@@ -0,0 +1,166 @@
+@@ -0,0 +1,180 @@
 +name: Custom Manager Cloud
 +on:
 +  workflow_dispatch:
@@ -171,6 +171,7 @@ index 00000000..2007ed29
 +      size: ${{ steps.cert.outputs.size }}
 +      hash: ${{ steps.cert.outputs.hash }}
 +    steps:
++      - uses: actions/checkout@v7
 +      - uses: actions/setup-java@v5
 +        with:
 +          distribution: temurin
@@ -185,6 +186,8 @@ index 00000000..2007ed29
 +          test -n "$KEYSTORE" && test -n "$PASSWORD"
 +          printf '%s' "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/cloud.jks"
 +          keytool -exportcert -alias cloud-manager -keystore "$RUNNER_TEMP/cloud.jks" -storepass:env PASSWORD -file certificate.der
++          cmp certificate.der .github/signing/certificate.der
++          (cd .github/signing && sha256sum -c certificate.sha256)
 +          printf 'size=0x%04x\n' "$(stat -c%s certificate.der)" >> "$GITHUB_OUTPUT"
 +          printf 'hash=%s\n' "$(sha256sum certificate.der | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
 +          rm "$RUNNER_TEMP/cloud.jks"
@@ -251,11 +254,21 @@ index 00000000..2007ed29
 +            printf 'KEYSTORE_PASSWORD=%s\nKEY_PASSWORD=%s\n' "$PASSWORD" "$PASSWORD"
 +            printf 'KEY_ALIAS=cloud-manager\n'
 +          } >> manager/gradle.properties
++      - name: Resolve official version name
++        run: |
++          if [ -f sync-provenance.json ]; then
++            SOURCE=$(jq -er .upstream_sha sync-provenance.json)
++          else
++            SOURCE=HEAD
++          fi
++          VERSION=$(git describe --tags --match "v[0-9]*" --long --abbrev=8 "$SOURCE")
++          printf '%s\n' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+-[0-9]+-g[0-9a-f]{8}$'
++          echo "KSU_VERSION_NAME=$VERSION" >> "$GITHUB_ENV"
 +      - name: Build signed manager with matched LKM
 +        working-directory: manager
 +        run: |
 +          chmod +x gradlew
-+          ./gradlew clean assembleRelease -PKSU_PACKAGE_NAME=op.ultra.plus
++          ./gradlew clean assembleRelease -PKSU_PACKAGE_NAME=op.ultra.plus -PKSU_VERSION_NAME="$KSU_VERSION_NAME" --warning-mode=fail
 +      - name: Sign final APK with cloud certificate
 +        env:
 +          PASSWORD: ${{ secrets.KSU_CLOUD_PASSWORD }}
@@ -286,8 +299,9 @@ index 00000000..2007ed29
 +          "$TOOLS/zipalign" -c -P 16 4 "$APK"
 +          "$TOOLS/aapt" dump badging "$APK" > delivery/package.txt
 +          grep -F "package: name='op.ultra.plus'" delivery/package.txt
-+          VERSION=$(git describe --tags --match "v[0-9]*" --long --abbrev=8)
++          VERSION="$KSU_VERSION_NAME"
 +          grep -F "versionName='$VERSION'" delivery/package.txt
++          grep -E "versionName='v[0-9]+\.[0-9]+\.[0-9]+-[0-9]+-g[0-9a-f]{8}'" delivery/package.txt
 +          unzip -t "$APK" | tail -n1
 +          python3 - <<'PY'
 +          import pathlib, zipfile, hashlib, json
@@ -305,8 +319,8 @@ index 00000000..2007ed29
 +            if [ -f sync-provenance.json ]; then
 +              cat sync-provenance.json
 +            else
-+              echo 'Upstream run: 38137972875'
-+              echo 'Source base: 1ba1ae693e1e92563dcb2a181eadd949330da7f1'
++              printf 'Customization baseline: '; cat .github/sync/base.txt
++              printf 'Version: '; git describe --tags --match 'v[0-9]*' --long --abbrev=8
 +            fi
 +            printf 'Custom commit: '; git rev-parse HEAD
 +            echo "Manager certificate / LKM expected hash: $EXPECTED_HASH"
@@ -325,7 +339,6 @@ index 00000000..2007ed29
 +          name: KernelSU-op-ultra-plus-cloud-signed
 +          path: delivery/
 +          if-no-files-found: error
-\ No newline at end of file
 diff --git a/.github/workflows/ddk-lkm.yml b/.github/workflows/ddk-lkm.yml
 index 2e2e6773..7b3fbaea 100644
 --- a/.github/workflows/ddk-lkm.yml
@@ -517,6 +530,36 @@ index 2981cd01..ac1e3693 100644
      steps:
        - uses: actions/checkout@v7
  
+diff --git a/.github/workflows/sync-upstream.yml b/.github/workflows/sync-upstream.yml
+new file mode 100644
+index 00000000..9417b73a
+--- /dev/null
++++ b/.github/workflows/sync-upstream.yml
+@@ -0,0 +1,24 @@
++name: Sync successful upstream build
++on:
++  schedule:
++    - cron: '3-59/10 * * * *'
++  workflow_dispatch:
++permissions:
++  contents: write
++  actions: write
++concurrency:
++  group: upstream-custom-sync
++  cancel-in-progress: false
++jobs:
++  sync:
++    runs-on: ubuntu-24.04
++    steps:
++      - uses: actions/checkout@v7
++        with:
++          ref: main
++          fetch-depth: 0
++          token: ${{ secrets.KSU_SYNC_TOKEN }}
++      - name: Apply reviewed patch and dispatch matched build
++        env:
++          GH_TOKEN: ${{ secrets.KSU_SYNC_TOKEN }}
++        run: python3 .github/sync/sync.py
 diff --git a/manager/app/build.gradle.kts b/manager/app/build.gradle.kts
 index e8349782..90e74ebe 100644
 --- a/manager/app/build.gradle.kts
@@ -820,7 +863,7 @@ index 7d9c90c0..15ef352e 100644
 +    <string name="settings_selinux_toggle_failed">Failed to switch SELinux mode; check Root access and kernel support</string>
  </resources>
 diff --git a/manager/build.gradle.kts b/manager/build.gradle.kts
-index 0e1db37f..69b54599 100644
+index 0e1db37f..746eb111 100644
 --- a/manager/build.gradle.kts
 +++ b/manager/build.gradle.kts
 @@ -16,13 +16,15 @@ extra["managerVersionCode"] = getVersionCode()
@@ -843,27 +886,58 @@ index 0e1db37f..69b54599 100644
  }
  
  fun getVersionCode(): Int {
+@@ -31,5 +33,5 @@ fun getVersionCode(): Int {
+ }
+ 
+ fun getVersionName(): String {
+-    return getGitDescribe()
++    return providers.gradleProperty("KSU_VERSION_NAME").orNull ?: getGitDescribe()
+ }
 diff --git a/manager/gradle.properties b/manager/gradle.properties
-index db2ab30b..9cd24805 100644
+index db2ab30b..cdf24780 100644
 --- a/manager/gradle.properties
 +++ b/manager/gradle.properties
-@@ -7,3 +7,6 @@ org.gradle.tooling.parallel=true
+@@ -1,9 +1,6 @@
+-android.experimental.enableNewResourceShrinker.preciseShrinking=true
+-android.enableAppCompileTimeRClass=true
+ android.useAndroidX=true
+ org.gradle.jvmargs=-Xmx2048m
+ org.gradle.parallel=true
+ org.gradle.tooling.parallel=true
  org.gradle.vfs.watch=true
- android.r8.maxWorkers=4
+-android.r8.maxWorkers=4
  android.native.buildOutput=verbose
-+
-+# AGP-supported suppression for the intentional R8 worker limit.
-+android.sync.suppressAgpWarnings=UNSUPPORTED_PROJECT_OPTION_USE
 diff --git a/manager/gradle/libs.versions.toml b/manager/gradle/libs.versions.toml
-index d17d87f6..4fc08510 100644
+index d17d87f6..dc727a2a 100644
 --- a/manager/gradle/libs.versions.toml
 +++ b/manager/gradle/libs.versions.toml
-@@ -12,7 +12,7 @@ webkit = "1.17.0"
+@@ -12,9 +12,8 @@ webkit = "1.17.0"
  parcelablelist = "2.0.1"
  material3 = "1.5.0-alpha28"
  materialKolor = "5.0.1"
 -ndk = "29.0.14206865"
 +ndk = "30.0.16248370"
  libsu = "6.0.0"
- apksign = "1.4"
+-apksign = "1.4"
  miuix = "0.9.4"
+ okhttp = "5.5.0"
+ hiddenapibypass = "6.1"
+@@ -30,7 +29,6 @@ kotlin = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+ compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+ kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+ 
+-lsplugin-apksign = { id = "org.lsposed.lsplugin.apksign", version.ref = "apksign" }
+ protobuf = { id = "com.google.protobuf", version = "0.10.0" }
+ 
+ [libraries]
+diff --git a/manager/settings.gradle.kts b/manager/settings.gradle.kts
+index 2b1a1024..9be5eeaa 100644
+--- a/manager/settings.gradle.kts
++++ b/manager/settings.gradle.kts
+@@ -1,6 +1,5 @@
+ @file:Suppress("UnstableApiUsage")
+ 
+-enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
+ 
+ pluginManagement {
+     repositories {
